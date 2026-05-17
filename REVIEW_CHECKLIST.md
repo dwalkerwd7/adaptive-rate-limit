@@ -2,12 +2,6 @@
 
 Hand this doc to Claude along with your code when you want a critical review. The point is to poke holes, not to praise.
 
-## How to prompt Claude for review
-
-> "Here's my implementation of [module name]. Review it against `06-review-checklist.md` and the relevant spec doc. Be ruthless. Find bugs, missed edge cases, race conditions, and security issues. Don't suggest stylistic improvements — only correctness and security."
-
-Paste the relevant spec doc(s) + the code. Don't paste *everything*; focused context gets better reviews.
-
 ## Universal checks (every module)
 
 - [ ] All error paths logged? Are any errors swallowed silently?
