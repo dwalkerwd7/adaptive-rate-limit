@@ -1,0 +1,38 @@
+{
+  "name": "@dtl/adaptive-rate-limit",
+  "version": "0.0.0",
+  "description": "A production-leaning Express middleware that goes beyond `express-rate-limit` and `rate-limit-redis` with per-route cost weights, adaptive limits based on server load, identifier chaining, and penalty scoring.",
+  "homepage": "https://github.com/dwalkerwd7/adaptive-rate-limit#readme",
+  "bugs": {
+    "url": "https://github.com/dwalkerwd7/dtl-rate-limit/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dwalkerwd7/adaptive-rate-limit.git"
+  },
+  "license": "MIT",
+  "author": "",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "files": [
+    "src/**/*.js",
+    "src/**/*.d.ts"
+  ],
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "supertest": "^7.2.2",
+    "vitest": "^4.1.6"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "ioredis": "^5.10.1"
+  }
+}
