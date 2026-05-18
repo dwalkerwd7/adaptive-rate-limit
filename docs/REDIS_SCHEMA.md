@@ -10,7 +10,7 @@ Default prefix: `rl:` (configurable via `keyPrefix`).
 |---|---|---|---|
 | `rl:window:<idType>:<idValue>` | Sorted Set | Sliding window entries | `windowMs * 2` |
 | `rl:penalty:<idType>:<idValue>` | String | Current penalty multiplier | `decayMs` |
-| (NOTE: this is not a v1 feature -- not implemented yet) `rl:meta:routes` | Hash | Route cost overrides (optional, for hot reload) | none |
+| `rl:meta:routes` | Hash | Route cost overrides (optional, for hot reload) | none |
 
 ### Why `windowMs * 2` TTL on the window key?
 

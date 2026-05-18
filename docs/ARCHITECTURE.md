@@ -64,8 +64,8 @@ A singleton (per process) that polls `process.cpuUsage()` and `process.memoryUsa
 ### `penalty/scorer.js`
 Exposes `getMultiplier(redis, identifier)` and `recordViolation(redis, identifier)`. Multiplier grows on repeat 429s, decays over time with TTL.
 
-### `dashboard/debug-route.js`
-Exposes a router that dumps current Redis state for all rate limit keys. Optional, off by default, gated by an auth token in production.
+### `inspection.js`
+Read-only helpers — `inspectIdentifier`, `listActiveIdentifiers`, `getLoadMetrics`, `resetIdentifier`. Plain async functions, not middleware. Used by `examples/admin-dashboard/` and available for user-built admin tooling.
 
 ### `redis/client.js`
 Wraps ioredis. Loads Lua scripts on connection. Provides health check.

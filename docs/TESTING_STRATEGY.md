@@ -63,14 +63,17 @@ Use a separate DB index (`db: 15`) for tests so you don't trample local dev data
 - `getMultiplier` on missing key returns 1.0
 - Concurrent violations don't lose increments (Lua atomicity)
 
-### `dashboard/debug-route.js`
+### `inspection.js`
 
-**Integration tests (supertest + real Redis):**
-- GET / without token → 401
-- GET / with wrong token → 401
-- GET / with right token → 200 + JSON
-- Seed Redis with known data, assert dashboard reflects it
-- DELETE /identifier/ip/1.2.3.4 actually removes the keys
+**Unit tests (real Redis):**
+- `inspectIdentifier` on missing identifier → returns `null`, not throws
+- Seed Redis with known state, assert `inspectIdentifier` returns correct counts, resetAt, and penalty multiplier
+- `listActiveIdentifiers` with empty Redis → empty array, valid cursor
+- Seed 200 identifiers, paginate through them, assert all are returned exactly once
+- `listActiveIdentifiers` with `filterType` only returns matching types
+- `getLoadMetrics` when adaptive disabled → returns `{ enabled: false, ... }`, doesn't crash
+- `resetIdentifier` removes both window and penalty keys (verify via direct Redis check)
+- `resetIdentifier` is idempotent — calling twice doesn't error
 
 ### `middleware.js`
 
@@ -81,8 +84,15 @@ Use a separate DB index (`db: 15`) for tests so you don't trample local dev data
 - Penalty applied: 5 violations → 6th request blocked at lower threshold
 - Headers set correctly on allowed and blocked responses
 - `failOpen: true` and Redis killed mid-test → still 200s with degraded header
-- `onLimit` callback fires with correct info object
 - Route cost: POST /expensive (cost 10) hits limit in 10 requests
+
+**Callback tests:**
+- `onLimit` fires with correct info object on 429
+- `onViolation` fires only when multiplier *changes* (not every blocked request after cap)
+- `onDegraded` fires when Redis fails open, gets the actual error object
+- `onAllowed` fires on every successful request with correct info
+- A callback that throws does NOT crash the middleware (it's logged and swallowed)
+- A callback that returns a rejected promise does NOT delay the response
 
 ## Burst simulation pattern
 

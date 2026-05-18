@@ -84,33 +84,60 @@ In middleware: when a request is blocked, call `recordViolation` for each over-l
 
 **Done when:** Test shows: 5 consecutive 429s for the same IP → multiplier reaches max → subsequent requests blocked at 1/4 of normal limit. After `decayMs` of no violations, multiplier returns to 1.
 
-### Task 2.3: Debug dashboard route (1-2 hr)
+### Task 2.3: Inspection helpers and callback wiring (45 min)
 
-Implement `src/dashboard/debug-route.js`.
+Implement `src/inspection.js` exporting four functions (full signatures in `02-api-design.md`):
 
-- Express router with the endpoints listed in `02-api-design.md`
-- Auth: check `Authorization: Bearer <token>` against `options.authToken`
-- Use `SCAN` (not `KEYS`) to find rate limit keys
-- For each identifier, fetch: current count, ttl, penalty multiplier
-- Reset endpoint: `DEL` the window key and the penalty key
+- `inspectIdentifier(redis, type, value, opts?)` — fetch full state for one identifier
+- `listActiveIdentifiers(redis, opts?)` — paginated scan
+- `getLoadMetrics()` — synchronous, reads from the load monitor singleton
+- `resetIdentifier(redis, type, value, opts?)` — clear both window and penalty keys
 
-**Done when:** `curl /ratelimit/debug` with the right token returns JSON listing tracked identifiers. Without the token, returns 401.
+These are plain async functions, not Express routers. Use `SCAN` for listing (never `KEYS`). Re-export from `src/index.js`.
 
-### Task 2.4: Documentation and example app (1 hr)
+Wire up the new callbacks in `middleware.js`:
+- `onViolation` fires inside `penalty.recordViolation` when the multiplier actually changes
+- `onDegraded` fires when a Redis call fails and we fail open
+- `onAllowed` fires after a successful check (document the perf cost in the API doc)
 
-- Update README with install instructions and the kitchen-sink example
-- Create `examples/basic-app.js` — a real Express app demonstrating all features
+All callbacks must be wrapped in try/catch — a user's broken callback shouldn't crash the middleware.
+
+**Done when:** Inspection unit tests pass (seed Redis with known data, assert the helpers return it). Integration test verifies each callback fires with the right shape.
+
+### Task 2.4: Admin dashboard example app (1-1.5 hr)
+
+Build `examples/admin-dashboard/` — a small standalone Express app that *consumes* the library to demonstrate observability.
+
+- `examples/admin-dashboard/server.js` — Express server with three routes:
+  - `GET /admin/identifiers` — calls `listActiveIdentifiers`, returns JSON
+  - `GET /admin/identifier/:type/:value` — calls `inspectIdentifier`
+  - `DELETE /admin/identifier/:type/:value` — calls `resetIdentifier`
+- `examples/admin-dashboard/public/index.html` — single-page UI that polls those routes and renders the data. Plain HTML + vanilla JS, no build step. Show identifier list, current counts, penalty multipliers, and a "Reset" button per row. Also display the current load factor from `getLoadMetrics()`.
+- Use basic auth or a static bearer token for protection — make it explicit in the README that this is example-grade auth, not production-grade.
+- `examples/admin-dashboard/README.md` — explains the demo, screenshot, "how to wire your own dashboard in production."
+
+This is your portfolio piece. Polish the UI a bit — clear table, reasonable styling, sortable columns if you have time.
+
+**Done when:** Running `npm start` in the example directory boots a server on a different port from your main app, and visiting `localhost:PORT` shows live rate-limit state for whichever app is connected to the same Redis.
+
+### Task 2.5: Documentation, types, and ship prep (1 hr)
+
+- Update top-level README with install instructions, kitchen-sink example, and a link to `examples/admin-dashboard/`
+- Create `examples/basic-app.js` — minimal Express app demonstrating just the middleware (no dashboard)
+- Write `src/index.d.ts` with the full type definitions (see `02-api-design.md`)
+- Add `tsc --noEmit --checkJs` to a `typecheck` script and verify it passes
 - Add a brief CHANGELOG.md
-- (Optional) publish dry-run with `npm publish --dry-run` to see what would ship
+- (Optional) `npm publish --dry-run` to see exactly what would ship
 
-**Done when:** A new developer can clone, `npm install`, `node examples/basic-app.js`, and curl-test all features.
+**Done when:** A new developer can clone, `npm install`, run both `examples/basic-app.js` and `examples/admin-dashboard/server.js`, and see everything work. `npm run typecheck` passes.
 
 ## Stretch goals (if time)
 
 - Token bucket strategy as an alternative to sliding window
 - Distributed adaptive metrics (share load info across instances via Redis pub/sub)
 - Prometheus metrics endpoint
-- TypeScript definitions
+- Hot-reloadable route costs via Redis hash (see note in `04-redis-schema.md`)
+- Real-time updates in the admin dashboard via Server-Sent Events
 
 ## Time budget reality check
 

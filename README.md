@@ -21,7 +21,9 @@ Existing rate limiter packages handle the basics (fixed window, sliding window, 
 rate-limiter/
 ├── src/
 │   ├── index.js                 # Public API export
+│   ├── index.d.ts               # TypeScript declarations
 │   ├── middleware.js            # Express middleware factory
+│   ├── inspection.js            # Read-only helpers for admin tooling
 │   ├── strategies/
 │   │   └── sliding-window.js    # Sliding window implementation
 │   ├── identifiers/
@@ -30,8 +32,6 @@ rate-limiter/
 │   │   └── load-monitor.js      # CPU/load polling
 │   ├── penalty/
 │   │   └── scorer.js            # Penalty tracking
-│   ├── dashboard/
-│   │   └── debug-route.js       # /ratelimit/debug
 │   └── redis/
 │       └── client.js            # Redis connection wrapper
 ├── test/
@@ -39,10 +39,15 @@ rate-limiter/
 │   ├── identifier-chain.test.js
 │   ├── adaptive.test.js
 │   ├── penalty.test.js
+│   ├── inspection.test.js
 │   └── integration.test.js
 ├── docs/                        # The planning docs you're reading
 ├── examples/
-│   └── basic-app.js
+│   ├── basic-app.js             # Minimal middleware usage
+│   └── admin-dashboard/         # Reference admin UI built on inspection helpers
+│       ├── server.js
+│       ├── public/index.html
+│       └── README.md
 └── package.json
 ```
 

@@ -3,8 +3,17 @@
 ## Public API
 
 ```js
-const { createRateLimiter, createDebugRouter } = require('@you/adaptive-rate-limiter');
+const {
+  createRateLimiter,
+  // Inspection helpers (for building your own admin UI):
+  inspectIdentifier,
+  listActiveIdentifiers,
+  getLoadMetrics,
+  resetIdentifier,
+} = require('@you/adaptive-rate-limiter');
 ```
+
+This library is a *primitive*, not a turnkey solution. It decides allow/deny and exposes inspection data. Building an admin dashboard, wiring logs, or pushing metrics is your job — the library gives you the hooks. See `examples/admin-dashboard/` for a reference implementation.
 
 ### `createRateLimiter(options)` → `express.Handler`
 
@@ -50,7 +59,12 @@ interface RateLimiterOptions {
   // --- Behavior ---
   failOpen?: boolean;                   // default: true (allow on Redis error)
   skipSuccessfulRequests?: boolean;     // default: false
-  onLimit?: (req, res, info) => void;   // custom 429 handler
+
+  // --- Event callbacks (all optional, all fire-and-forget) ---
+  onLimit?: (req, res, info) => void;             // fires on 429
+  onViolation?: (req, info) => void;              // fires when penalty multiplier increases
+  onDegraded?: (req, error) => void;              // fires when Redis fails open
+  onAllowed?: (req, info) => void;                // fires on every allowed request (use sparingly — hot path)
 
   // --- Response ---
   standardHeaders?: boolean;            // default: true (IETF draft headers)
@@ -77,20 +91,65 @@ identifiers: [
 
 If an extractor returns `null`/`undefined`, that identifier is skipped for that request (not treated as the string "undefined").
 
-### `createDebugRouter(options)` → `express.Router`
+### Inspection API
 
-```js
-app.use('/ratelimit/debug', createDebugRouter({
-  redis: redisClient,
-  authToken: process.env.RL_DEBUG_TOKEN,  // required in production
-}));
+These are plain async functions, not Express middleware. Use them to build your own admin route, CLI tool, or dashboard. All require a Redis client and optionally accept the `keyPrefix` used when creating the limiter.
+
+#### `inspectIdentifier(redis, type, value, opts?)` → `Promise<IdentifierState | null>`
+
+Returns the full state for one identifier, or `null` if no record exists.
+
+```ts
+interface IdentifierState {
+  type: string;
+  value: string;                  // the original value (not hashed)
+  currentCount: number;
+  windowMs: number;
+  resetAt: number;                // unix ms
+  penaltyMultiplier: number;      // 1.0 if no penalty
+  penaltyExpiresAt: number | null;
+}
 ```
 
-Endpoints:
-- `GET /` — index of identifiers currently being tracked
-- `GET /identifier/:type/:value` — full state for one identifier
-- `GET /load` — current adaptive load factor and raw metrics
-- `DELETE /identifier/:type/:value` — clear penalty + window (admin reset)
+#### `listActiveIdentifiers(redis, opts?)` → `Promise<IdentifierSummary[]>`
+
+Returns a paginated list of all currently tracked identifiers. Uses `SCAN` internally (never `KEYS`).
+
+```ts
+interface IdentifierSummary {
+  type: string;
+  valueHash: string;              // hashed — see note below
+  currentCount: number;
+  penaltyMultiplier: number;
+}
+
+// Options
+interface ListOptions {
+  cursor?: string;                // for pagination, default '0'
+  count?: number;                 // hint to SCAN, default 100
+  filterType?: string;            // only return identifiers of this type
+}
+```
+
+**Note on hashing:** since identifier values are hashed before being used as Redis keys (see `04-redis-schema.md`), bulk listing can only return hashes, not original values. If you need the original value for a known identifier, you already have it from the request — call `inspectIdentifier(redis, type, value)` and it'll hash it for you.
+
+#### `getLoadMetrics()` → `LoadMetrics`
+
+Synchronous. Returns the current adaptive load monitor state.
+
+```ts
+interface LoadMetrics {
+  enabled: boolean;
+  currentFactor: number;          // 0.3 to 1.0
+  cpuPercent: number;
+  lastSampleAt: number;
+  cpuThreshold: number;
+}
+```
+
+#### `resetIdentifier(redis, type, value, opts?)` → `Promise<void>`
+
+Deletes both the window and penalty keys for an identifier. Useful for support workflows ("a customer reports being blocked — clear them and investigate").
 
 ## Response contract
 
@@ -131,7 +190,9 @@ RateLimit-Status: degraded
 ```
 Request passes through, no 429 headers set.
 
-## Info object passed to `onLimit`
+## Info objects passed to callbacks
+
+`onLimit` and `onAllowed` receive `(req, res, info)` / `(req, info)` respectively, where `info` has this shape:
 
 ```ts
 interface LimitInfo {
@@ -144,8 +205,24 @@ interface LimitInfo {
   resetAt: number;                        // unix ms
   adaptiveFactor: number;
   penaltyMultiplier: number;
+  allowed: boolean;                       // redundant on onLimit (always false) but useful for shared types
 }
 ```
+
+`onViolation` receives `(req, info)` with this shape:
+
+```ts
+interface ViolationInfo {
+  identifier: { type: string };
+  previousMultiplier: number;
+  newMultiplier: number;                  // capped at maxMultiplier
+  decayMs: number;
+}
+```
+
+`onDegraded` receives `(req, error)` — the Express request that triggered the degraded path, and the underlying error from Redis.
+
+**All callbacks are fire-and-forget.** Errors thrown inside callbacks are caught and logged, never bubble up to the request. Don't do heavy work in them — push to a queue if you need to.
 
 ## Examples
 
@@ -175,7 +252,16 @@ app.use(createRateLimiter({
   penalty: { enabled: true, maxMultiplier: 4 },
   onLimit: (req, res, info) => {
     logger.warn({ info }, 'rate limited');
-    res.status(429).json({ /* custom */ });
+    metrics.increment('ratelimit.blocked', { type: info.identifier.type });
+  },
+  onViolation: (req, info) => {
+    if (info.newMultiplier >= 3) {
+      logger.error({ info, ip: req.ip }, 'repeat offender — investigate');
+    }
+  },
+  onDegraded: (req, error) => {
+    logger.error({ err: error }, 'rate limiter degraded — Redis unreachable');
+    metrics.increment('ratelimit.degraded');
   },
 }));
 ```
@@ -188,3 +274,21 @@ const apiLimiter = createRateLimiter({ windowMs: 60_000, limit: 100, ... });
 app.post('/api/ai/generate', aiLimiter, handler);
 app.use('/api', apiLimiter);
 ```
+
+### Building your own admin endpoint
+```js
+const { inspectIdentifier, resetIdentifier } = require('@you/adaptive-rate-limiter');
+
+app.get('/admin/ratelimit/:type/:value', requireAdmin, async (req, res) => {
+  const state = await inspectIdentifier(redis, req.params.type, req.params.value);
+  if (!state) return res.status(404).json({ error: 'no record' });
+  res.json(state);
+});
+
+app.delete('/admin/ratelimit/:type/:value', requireAdmin, async (req, res) => {
+  await resetIdentifier(redis, req.params.type, req.params.value);
+  res.status(204).end();
+});
+```
+
+The library doesn't mount these routes itself — your auth, your URL structure, your response shape. See `examples/admin-dashboard/` for a complete reference implementation.

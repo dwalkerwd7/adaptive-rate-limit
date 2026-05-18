@@ -2,6 +2,12 @@
 
 Hand this doc to Claude along with your code when you want a critical review. The point is to poke holes, not to praise.
 
+## How to prompt Claude for review
+
+> "Here's my implementation of [module name]. Review it against `06-review-checklist.md` and the relevant spec doc. Be ruthless. Find bugs, missed edge cases, race conditions, and security issues. Don't suggest stylistic improvements — only correctness and security."
+
+Paste the relevant spec doc(s) + the code. Don't paste *everything*; focused context gets better reviews.
+
 ## Universal checks (every module)
 
 - [ ] All error paths logged? Are any errors swallowed silently?
@@ -56,26 +62,36 @@ Hand this doc to Claude along with your code when you want a critical review. Th
 - [ ] If `recordViolation` fails (Redis down), is the error logged? Does the request still return 429?
 - [ ] Does the multiplier cap actually trigger before exceeding `maxMultiplier`?
 - [ ] What if a request is blocked by *multiple* identifiers — does each one get a violation recorded? (Probably yes, document it)
-- [ ] Is there a way to manually reset a penalty? (Debug dashboard has DELETE — confirm it kills the penalty key too)
+- [ ] Is there a way to manually reset a penalty? (`resetIdentifier` should clear both the window and the penalty key)
 - [ ] What if `decayMs` is shorter than `windowMs`? Penalty disappears mid-window — intended?
 
-## Debug dashboard
+## Inspection helpers
 
 - [ ] Is `KEYS` used anywhere? Replace with `SCAN`. `KEYS` blocks Redis.
-- [ ] Is the auth token comparison constant-time? (Use `crypto.timingSafeEqual`)
-- [ ] Does the dashboard work if zero identifiers are being tracked? (No keys found should be 200 with empty array, not 500)
-- [ ] Is the dashboard mountable at any path, or hardcoded to `/ratelimit/debug`?
-- [ ] If `authToken` is unset, what happens? (Should refuse to start in production, allow in development)
-- [ ] Does DELETE clear both window *and* penalty keys for that identifier?
+- [ ] Does `listActiveIdentifiers` actually paginate, or load everything into memory? (Cursor must be respected.)
+- [ ] Does it work if zero identifiers are being tracked? (Empty array, not error.)
+- [ ] Does `inspectIdentifier` return `null` for missing identifiers, or throw?
+- [ ] Does `resetIdentifier` clear *both* window and penalty keys atomically? (Use a pipeline or MULTI.)
+- [ ] Does `getLoadMetrics` work when the adaptive monitor is disabled? (Should return `{ enabled: false, ... }` not crash.)
+- [ ] Are the helpers safe to call concurrently with active middleware traffic? (They should be read-only except for `resetIdentifier`.)
+
+## Callback contracts
+
+- [ ] Is every callback wrapped in try/catch? A broken user callback must NOT crash the middleware.
+- [ ] Are callbacks truly fire-and-forget? They should not block the response.
+- [ ] Does `onViolation` only fire when the multiplier *actually changes* (not on every blocked request after the cap is hit)?
+- [ ] Does `onDegraded` fire exactly once per failed Redis call, or could it fire multiple times for one request (e.g. once for window check, once for penalty read)?
+- [ ] Is `onAllowed` performance documented as a warning? (Fires on every successful request — easy to slow the whole app.)
+- [ ] Do the info objects match the shape documented in `02-api-design.md` exactly? (No extra fields, no missing fields.)
 
 ## Security-specific checks
 
-- [ ] Can a malicious header value cause a Redis key explosion? (Hashing identifier values prevents this — confirm)
+- [ ] Can a malicious header value cause a Redis key explosion? (Hashing identifier values prevents *forgery* but not *churn* — see 04-redis-schema for the full discussion. Confirm hashing is in place at minimum.)
 - [ ] Can the 429 response leak which identifier triggered? Acceptable to reveal the *type* (ip/user/apiKey) but not the value.
-- [ ] Are debug route responses cacheable? They shouldn't be. Set `Cache-Control: no-store`.
 - [ ] Is `X-Forwarded-For` trusted blindly? (Should require explicit `trust proxy` config)
 - [ ] If `failOpen: true`, is that documented as a security tradeoff?
-- [ ] Could the penalty system be weaponized? (Attacker spoofs IPs to penalize legit users — note this is fundamental to IP-based limiting, not a flaw in your design, but worth a comment)
+- [ ] Could the penalty system be weaponized? (Attacker spoofs IPs to penalize legit users — fundamental to IP-based limiting, not a flaw, but worth a comment.)
+- [ ] Are inspection helpers safe to expose? (They reveal counts and patterns — fine for an authenticated admin, dangerous if leaked publicly. Document.)
 
 ## API surface checks
 
