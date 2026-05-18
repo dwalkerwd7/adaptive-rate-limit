@@ -1,4 +1,4 @@
-# 04 — Redis Schema
+# 04 — Redis
 
 Every key, every script, every TTL.
 
