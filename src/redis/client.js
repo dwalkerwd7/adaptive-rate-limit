@@ -4,8 +4,8 @@ import path from "node:path"
 
 const redis = new Redis(process.env.REDIS_HOST)
 
-const slidingWindowCheckScript = readFileSync(path.join(__dirname, "../strategies/slidingWindowCheck.lua"))
-const recordViolationScript = readFileSync(path.join(__dirname, "../strategies/recordViolation.lua"))
+const slidingWindowCheckScript = readFileSync(path.join(__dirname, "../strategies/sliding-window-check.lua"))
+const recordViolationScript = readFileSync(path.join(__dirname, "../strategies/record-violation.lua"))
 
 // KEYS[1] = window key
 // ARGV[1] = now (ms)
