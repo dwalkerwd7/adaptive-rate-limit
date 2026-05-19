@@ -2,7 +2,7 @@ import Redis from "ioredis"
 import { readFileSync } from "fs"
 import path from "node:path"
 
-const redis = new Redis(process.env.REDIS_HOST)
+const redis = new Redis(process.env.ARL_REDIS_HOST)
 
 const slidingWindowCheckScript = readFileSync(path.join(__dirname, "../strategies/sliding-window-check.lua"))
 const recordViolationScript = readFileSync(path.join(__dirname, "../strategies/record-violation.lua"))
