@@ -1,6 +1,6 @@
-import { argv0 } from "node:process"
-import redis from "../redis/client"
 import crypto from "node:crypto"
+import { readFileSync } from "node:fs"
+import path from "node:path"
 
 // cost members can't really be generated directly in the lua script due to lua limitations on generating random bytes
 function generateCostMembers(cost) {
@@ -12,8 +12,23 @@ function generateCostMembers(cost) {
   return members;
 }
 
+export function registerScript(redis) {
+  const slidingWindowCheckScript = readFileSync(path.join(__dirname, "sliding-window-check.lua"))
+
+  // KEYS[1] = window key
+  // ARGV[1] = now (ms)
+  // ARGV[2] = windowMs
+  // ARGV[3] = limit
+  // ARGV[4] = cost
+  // ARGV[5..N] = new entry strings (one per cost unit)
+  redis.defineCommand("slidingWindowCheck", {
+    numberOfKeys: 1,
+    lua: slidingWindowCheckScript
+  })
+}
+
 // calls once per request in the middleware wrapper
-export default async function check(redis, key, windowMs, limit, cost) {
+export async function check(redis, key, windowMs, limit, cost) {
   if (cost === 0) {
     const count = await redis.zcard(key)
     return {

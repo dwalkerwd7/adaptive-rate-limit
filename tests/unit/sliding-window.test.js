@@ -1,11 +1,15 @@
-import { describe, it, expect, beforeEach, afterAll } from "vitest"
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "vitest"
 import redis from "../../src/redis/client"
-import check from "../../src/strategies/sliding-window"
+import { check, registerScript } from "../../src/strategies/sliding-window"
 
 const mockIpKey = "rl:window:ip:0.0.0.1"
 let res = null
 
 describe("check", () => {
+  beforeAll(() => {
+    registerScript(redis)
+  })
+
   beforeEach(async () => {
     await redis.flushdb()
     res = {
