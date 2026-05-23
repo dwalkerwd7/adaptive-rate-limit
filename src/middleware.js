@@ -15,7 +15,7 @@ function resolveCost(req, options) {
   return 1
 }
 
-export const createRateLimiter = (options) => {
+export default createRateLimiter = (options) => {
   if (!options.redis) throw Error("[ARL]: redis options or instance not provided")
   if (typeof options.redis !== "object" && !(options.redis instanceof Redis)) throw TypeError("type of redis provided is not correct")
   if (!options?.windowMs) throw Error("[ARL]: windowMs option required")

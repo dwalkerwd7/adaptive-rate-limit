@@ -1,1 +1,1 @@
-export { createRateLimiter } from "middleware"
+export { default } from "./middleware"
