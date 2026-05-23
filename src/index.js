@@ -1,1 +1,1 @@
-export const createRateLimiter = () => { }
+export { createRateLimiter } from "middleware"
