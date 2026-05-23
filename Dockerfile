@@ -10,6 +10,9 @@ RUN npm ci --omit=dev
 COPY src/ ./src/
 COPY examples/demo/ ./examples/demo/
 
+ENV HOSTNAME=0.0.0.0
+ENV PORT=5003
+
 EXPOSE 5003
 
 ENTRYPOINT ["node", "examples/demo/server.js"]
