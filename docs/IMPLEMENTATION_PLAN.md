@@ -110,12 +110,15 @@ All callbacks must be wrapped in try/catch — a user's broken callback shouldn'
   - `GET /admin/identifiers` — calls `listActiveIdentifiers`, returns JSON
   - `GET /admin/identifier/:type/:value` — calls `inspectIdentifier`
   - `DELETE /admin/identifier/:type/:value` — calls `resetIdentifier`
-- `examples/admin-dashboard/public/index.html` — single-page UI that polls those routes and renders the data. Plain HTML + vanilla JS, no build step. Show identifier list, current counts, penalty multipliers, and a "Reset" button per row. Also display the current load factor from `getLoadMetrics()`.
+- `examples/admin-dashboard/public/index.html` — single-page UI that polls those routes and renders the data. Show identifier list, current counts, penalty multipliers, and a "Reset" button per row. Also display the current load factor from `getLoadMetrics()`.
 - Use basic auth or a static bearer token for protection — make it explicit in the README that this is example-grade auth, not production-grade.
 - `examples/admin-dashboard/README.md` — explains the demo, screenshot, "how to wire your own dashboard in production."
 
 This is your portfolio piece. Polish the UI a bit — clear table, reasonable styling, sortable columns if you have time.
 Use Tailwind CSS and React for the front-end. It should be clear. Choose a light-themed color palette. Only one theme is necessary.
+
+**Feature done when:** A react component or a hook or any atomic feature like these are completed.
+The front-end should not be tested as the back-end covers the integration tests.
 
 **Done when:** Running `npm start` in the example directory boots a server on a different port from your main app, and visiting `localhost:PORT` shows live rate-limit state for whichever app is connected to the same Redis.
 
