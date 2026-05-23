@@ -3,7 +3,7 @@ import type { Redis, RedisOptions } from 'ioredis'
 
 // ─── Identifier ────────────────────────────────────────────────────────────
 
-export type IdentifierPreset = 'ip' | 'user' | 'userId' | 'apiKey' | 'session' | 'sessionId'
+export type IdentifierPreset = 'ip' | 'userId' | 'apiKey' | 'sessionId'
 
 export interface CustomIdentifier {
   type: string
