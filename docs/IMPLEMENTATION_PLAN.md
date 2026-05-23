@@ -104,23 +104,30 @@ All callbacks must be wrapped in try/catch — a user's broken callback shouldn'
 
 **Done when:** Inspection unit tests pass (seed Redis with known data, assert the helpers return it). Integration test verifies each callback fires with the right shape.
 
-### Task 2.4: Admin dashboard example app (1-1.5 hr)
+### Task 2.4: Demo dashboard example app (1-1.5 hr)
 
-- `examples/admin-dashboard/server.js` — Express server with three routes:
-  - `GET /admin/identifiers` — calls `listActiveIdentifiers`, returns JSON
-  - `GET /admin/identifier/:type/:value` — calls `inspectIdentifier`
-  - `DELETE /admin/identifier/:type/:value` — calls `resetIdentifier`
-- `examples/admin-dashboard/public/index.html` — single-page UI that polls those routes and renders the data. Show identifier list, current counts, penalty multipliers, and a "Reset" button per row. Also display the current load factor from `getLoadMetrics()`.
-- Use basic auth or a static bearer token for protection — make it explicit in the README that this is example-grade auth, not production-grade.
-- `examples/admin-dashboard/README.md` — explains the demo, screenshot, "how to wire your own dashboard in production."
+A portfolio/showcase app that lets you watch the library's features play out interactively — no auth, no admin tooling.
 
-This is your portfolio piece. Polish the UI a bit — clear table, reasonable styling, sortable columns if you have time.
-Use Tailwind CSS and React for the front-end. It should be clear. Choose a light-themed color palette. Only one theme is necessary.
+- `examples/demo/server.js` — Express app on port 3001. Three demo endpoints all behind `createRateLimiter`:
+  - `windowMs: 10_000`, `limit: 20`, `adaptive: { enabled: true, cpuThreshold: 60, minFactor: 0.3 }`, `identifiers: ['ip']`
+  - `GET /api/ping` → cost 1 (lightweight)
+  - `GET /api/search` → cost 5 (medium, simulates a DB query with a short delay)
+  - `GET /api/crunch` → cost 10, runs a synchronous CPU-burning loop (sum primes to 50 000) so the load monitor actually reacts
+  - `GET /api/status` → unauthenticated, returns `getLoadMetrics()`
+  - All rate-limit headers (`RateLimit-Remaining`, `RateLimit-Limit`, `RateLimit-Reset`, `RateLimit-Policy`) flow through from the middleware
+- `examples/demo/public/index.html` — React 18 + Tailwind CDN, light theme, no login prompt.
+  - Three endpoint cards side by side, each with: name, cost badge, Send button, last-response status pill (green/red), remaining-quota progress bar, log of last 5 responses
+  - Global status bar at top: load factor (colour-coded), CPU % bar, effective limit (`floor(20 × loadFactor)`), polls `/api/status` every 2 s
+  - Clicking a card button fires one fetch, reads response headers, updates that card — no auto-polling
+  - 429 cards show "Rate limited — resets in Xs" from `RateLimit-Reset`
+- `examples/demo/README.md` — what it demos, how to run, how to trigger adaptive load reduction (spam the crunch button)
+
+Use Tailwind CSS and React for the front-end. Light-themed color palette. One theme only.
 
 **Feature done when:** A react component or a hook or any atomic feature like these are completed.
 The front-end should not be tested as the back-end covers the integration tests.
 
-**Done when:** Running `npm start` in the example directory boots a server on a different port from your main app, and visiting `localhost:PORT` shows live rate-limit state for whichever app is connected to the same Redis.
+**Done when:** Running `npm start` in `examples/demo/` boots on port 3001, visiting `localhost:3001` shows three cards with no login prompt, clicking crunch repeatedly causes the load factor to drop and the effective limit to decrease.
 
 ### Task 2.5: Documentation, types, and ship prep (1 hr)
 
