@@ -4,7 +4,7 @@ import Redis from "ioredis"
 import createRateLimiter from "../../src/middleware.js"
 import { getLoadMetrics } from "../../src/inspection.js"
 
-const PORT = process.env.PORT ?? 3001
+const PORT = process.env.PORT ?? 5003
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379"
 
 const redis = new Redis(REDIS_URL)
