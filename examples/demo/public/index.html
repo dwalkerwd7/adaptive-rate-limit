@@ -173,7 +173,7 @@
             <div className="flex justify-between items-start mb-1">
               <div>
                 <div className="font-sans font-bold text-xs text-slate-400 tracking-widest uppercase mb-1">GET</div>
-                <div className="font-mono font-medium text-base text-ink">{path}</div>
+                <div className="font-mono font-medium text-base text-ink">{path.slice(PATH_PREFIX.length)}</div>
               </div>
               <div className="flex flex-col items-end gap-1.5 pt-0.5">
                 <span className="font-sans font-bold text-xs tracking-wider px-2 py-0.5 rounded-md bg-cream border border-cream-border text-slate-500">
