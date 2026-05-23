@@ -9,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = process.env.PORT ?? 3001
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379"
 
-const redis = new Redis(REDIS_URL, { lazyConnect: true })
+const redis = new Redis(REDIS_URL)
 redis.on("error", err => console.error("[demo] Redis:", err.message))
 
 const app = express()
@@ -20,7 +20,7 @@ const limiter = createRateLimiter({
   redis,
   windowMs: 10_000,
   limit: 20,
-  identifiers: ["ip"],
+  identifiers: ["ip", "sessionId"],
   routeCosts: {
     "GET /api/ping": 1,
     "GET /api/search": 5,
