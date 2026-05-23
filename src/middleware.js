@@ -1,10 +1,10 @@
 import Redis from "ioredis"
-import { hashValue } from "./utils"
-import createClient from "./redis/client"
-import * as sw from "./strategies/sliding-window"
+import { hashValue } from "./utils.js"
+import createClient from "./redis/client.js"
+import * as sw from "./strategies/sliding-window.js"
 import * as sc from "./penalty/scorer.js"
-import resolveIdentifiers from "./indentifiers/chain"
-import { getMonitor } from "./adaptive/load-monitor"
+import resolveIdentifiers from "./indentifiers/chain.js"
+import { getMonitor } from "./adaptive/load-monitor.js"
 
 function resolveCost(req, options) {
   if (options.costResolver) return options.costResolver(req)

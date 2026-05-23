@@ -1,5 +1,5 @@
-import { hashValue } from "./utils"
-import { getInstance } from "./adaptive/load-monitor"
+import { hashValue } from "./utils.js"
+import { getInstance } from "./adaptive/load-monitor.js"
 
 export async function inspectIdentifier(redis, type, value, opts = {}) {
   const keyPrefix = opts.keyPrefix ?? "rl"
