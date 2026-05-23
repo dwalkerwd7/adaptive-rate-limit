@@ -30,6 +30,9 @@ const limiter = createRateLimiter({
     minFactor: 0.3,
     pollIntervalMs: 1000,
   },
+  penalty: {
+    maxMultiplier: 1,
+  },
 })
 
 app.get("/api/status", (_req, res) => {
