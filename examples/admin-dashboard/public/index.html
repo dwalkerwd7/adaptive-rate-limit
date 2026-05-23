@@ -39,7 +39,7 @@ function useAdminData(token, pollMs = 5000) {
       ])
 
       if (idRes.status === 401 || loadRes.status === 401) {
-        setError('Invalid token — check ADMIN_TOKEN')
+        setError('Invalid token — copy the "Auth token:" value printed in the server terminal and paste it into the Connect box above')
         return
       }
 

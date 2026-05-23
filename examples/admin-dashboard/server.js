@@ -69,6 +69,6 @@ if (isMain) {
   app.listen(PORT, () => {
     console.log(`Admin dashboard running at http://localhost:${PORT}`)
     console.log(`Using Redis: ${REDIS_URL}`)
-    console.log(`Auth token: ${ADMIN_TOKEN === "dev-token-change-in-production" ? "(default dev token)" : "(custom token set)"}`)
+    console.log(`Auth token: ${ADMIN_TOKEN}`)
   })
 }
