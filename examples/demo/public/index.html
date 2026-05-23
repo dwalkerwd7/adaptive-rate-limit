@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>adaptive-rate-limit · live demo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      background-color: #F7F5F0;
+      color: #1C1C1A;
+      font-family: 'IBM Plex Mono', monospace;
+      min-height: 100vh;
+    }
+    .syne { font-family: 'Syne', sans-serif; }
+
+    .card {
+      background: #fff;
+      border: 1px solid #E8E5DC;
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.04);
+      transition: box-shadow 0.2s ease;
+    }
+    .card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.07); }
+
+    .card-accent { height: 3px; transition: background-color 0.5s ease; }
+
+    .quota-track {
+      background: #F0EDE6;
+      border-radius: 999px;
+      height: 6px;
+      overflow: hidden;
+    }
+    .quota-fill {
+      height: 100%;
+      border-radius: 999px;
+      transition: width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.3s ease;
+    }
+
+    .send-btn {
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      padding: 11px 20px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      width: 100%;
+      transition: all 0.15s ease;
+    }
+    .send-btn.idle { background: #1C1C1A; color: #F7F5F0; }
+    .send-btn.idle:hover { background: #FF4D00; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(255,77,0,0.3); }
+    .send-btn.idle:active { transform: none; box-shadow: none; }
+    .send-btn.sending { background: #F0EDE6; color: #1C1C1A; cursor: wait; }
+    .send-btn.blocked { background: #FEE2E2; color: #991B1B; cursor: not-allowed; }
+
+    .status-pill {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 0.68rem; font-weight: 500;
+      padding: 2px 8px; border-radius: 999px;
+    }
+    .pill-200 { background: #D1FAE5; color: #065F46; }
+    .pill-429 { background: #FEE2E2; color: #991B1B; }
+
+    .cost-badge {
+      font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.68rem;
+      letter-spacing: 0.05em; padding: 3px 8px; border-radius: 6px;
+      background: #F7F5F0; color: #666; border: 1px solid #E8E5DC;
+    }
+
+    .log-row {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 0.67rem; color: #888; padding: 2px 0;
+      animation: fadeIn 0.2s ease;
+    }
+    .log-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+    .blocked-notice {
+      display: flex; align-items: center; gap: 8px;
+      background: #FEF2F2; border: 1px solid #FECACA;
+      border-radius: 8px; padding: 9px 12px;
+      font-size: 0.72rem; color: #991B1B; font-weight: 500;
+    }
+
+    /* Status bar */
+    .topbar { background: #1C1C1A; }
+
+    .factor-num {
+      font-family: 'Syne', sans-serif; font-weight: 800;
+      font-size: 2rem; line-height: 1; letter-spacing: -0.02em;
+      transition: color 0.4s ease;
+    }
+    .cpu-track {
+      background: rgba(255,255,255,0.1);
+      border-radius: 999px; height: 4px; overflow: hidden; width: 110px;
+    }
+    .cpu-fill { height: 100%; border-radius: 999px; transition: width 0.6s ease; }
+
+    .divider { width: 1px; height: 40px; background: rgba(255,255,255,0.1); }
+
+    .adaptive-badge {
+      font-family: 'Syne', sans-serif; font-size: 0.62rem; font-weight: 700;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      padding: 3px 9px; border-radius: 4px; display: inline-flex; align-items: center; gap: 6px;
+    }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+    @keyframes pulseDot { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+    .pulse-dot { animation: pulseDot 1.5s ease-in-out infinite; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React
+
+const BASE_LIMIT = 20
+
+// ── useLoadStatus ──────────────────────────────────────────────────────────
+function useLoadStatus(pollMs = 2000) {
+  const [s, setS] = useState({ factor: 1, cpuPercent: 0, effectiveLimit: BASE_LIMIT, enabled: false })
+  useEffect(() => {
+    let alive = true
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/status')
+        if (!res.ok || !alive) return
+        const d = await res.json()
+        if (alive) setS({
+          factor: d.currentFactor ?? 1,
+          cpuPercent: d.cpuPercent ?? 0,
+          effectiveLimit: Math.floor(BASE_LIMIT * (d.currentFactor ?? 1)),
+          enabled: d.enabled ?? false,
+        })
+      } catch {}
+    }
+    poll()
+    const id = setInterval(poll, pollMs)
+    return () => { alive = false; clearInterval(id) }
+  }, [pollMs])
+  return s
+}
+
+// ── useEndpoint ────────────────────────────────────────────────────────────
+function useEndpoint(path) {
+  const [state, setState] = useState({ httpStatus: null, remaining: null, limit: null, resetAt: null, log: [], sending: false })
+  const [countdown, setCountdown] = useState(null)
+  const timerRef = useRef(null)
+
+  const startCountdown = useCallback((resetAt) => {
+    if (timerRef.current) clearInterval(timerRef.current)
+    const tick = () => {
+      const secs = Math.max(0, Math.ceil((resetAt - Date.now()) / 1000))
+      setCountdown(secs)
+      if (secs <= 0) { clearInterval(timerRef.current); timerRef.current = null; setCountdown(null) }
+    }
+    tick()
+    timerRef.current = setInterval(tick, 500)
+  }, [])
+
+  useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current) }, [])
+
+  const send = useCallback(async () => {
+    setState(s => ({ ...s, sending: true }))
+    const ts = Date.now()
+    try {
+      const res = await fetch(path)
+      const httpStatus = res.status
+      const limit    = parseInt(res.headers.get('ratelimit-limit'))   || null
+      const remaining = parseInt(res.headers.get('ratelimit-remaining'))
+      const resetAt  = parseInt(res.headers.get('ratelimit-reset'))   || null
+
+      setState(s => ({
+        ...s, sending: false, httpStatus,
+        remaining: isNaN(remaining) ? null : remaining,
+        limit, resetAt,
+        log: [{ status: httpStatus, ts }, ...s.log].slice(0, 5),
+      }))
+
+      if (httpStatus === 429 && resetAt) startCountdown(resetAt)
+    } catch {
+      setState(s => ({ ...s, sending: false }))
+    }
+  }, [path, startCountdown])
+
+  const blocked = state.httpStatus === 429 && countdown !== null && countdown > 0
+  return { ...state, send, blocked, countdown }
+}
+
+// ── RelTime ────────────────────────────────────────────────────────────────
+function RelTime({ ts }) {
+  const [, tick] = useState(0)
+  useEffect(() => { const id = setInterval(() => tick(t => t + 1), 5000); return () => clearInterval(id) }, [])
+  const s = Math.floor((Date.now() - ts) / 1000)
+  const label = s < 5 ? 'just now' : s < 60 ? `${s}s ago` : `${Math.floor(s/60)}m ago`
+  return <span style={{ color: '#B0ADA5' }}>{label}</span>
+}
+
+// ── QuotaBar ──────────────────────────────────────────────────────────────
+function QuotaBar({ remaining, limit }) {
+  const pct   = remaining !== null && limit ? Math.max(0, Math.min(100, (remaining / limit) * 100)) : 100
+  const empty = remaining === null
+  const color = empty ? '#E8E5DC' : pct > 50 ? '#10B981' : pct > 20 ? '#F59E0B' : '#EF4444'
+  return (
+    <div>
+      <div className="quota-track">
+        <div className="quota-fill" style={{ width: `${empty ? 100 : pct}%`, background: color }} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5, fontSize: '0.67rem', color: '#B0ADA5' }}>
+        <span>{remaining !== null ? remaining : '—'} remaining</span>
+        <span>/ {limit ?? '—'}</span>
+      </div>
+    </div>
+  )
+}
+
+// ── EndpointCard ──────────────────────────────────────────────────────────
+function EndpointCard({ path, cost, description }) {
+  const { httpStatus, remaining, limit, send, sending, blocked, countdown, log } = useEndpoint(path)
+  const pct = remaining !== null && limit ? (remaining / limit) * 100 : 100
+  const accentColor = blocked ? '#EF4444' : remaining === null ? '#E8E5DC' : pct > 50 ? '#10B981' : pct > 20 ? '#F59E0B' : '#EF4444'
+  const btnClass = sending ? 'sending' : blocked ? 'blocked' : 'idle'
+
+  return (
+    <div className="card">
+      <div className="card-accent" style={{ background: accentColor }} />
+      <div style={{ padding: '18px 18px 0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 3 }}>
+          <div>
+            <div className="syne" style={{ fontWeight: 700, fontSize: '0.65rem', color: '#B0ADA5', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 2 }}>GET</div>
+            <div style={{ fontWeight: 500, fontSize: '0.95rem', color: '#1C1C1A' }}>{path}</div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, paddingTop: 2 }}>
+            <span className="cost-badge">×{cost}</span>
+            {httpStatus && <span className={`status-pill ${httpStatus === 200 ? 'pill-200' : 'pill-429'}`}>{httpStatus}</span>}
+          </div>
+        </div>
+        <div style={{ fontSize: '0.68rem', color: '#B0ADA5', fontStyle: 'italic', marginBottom: 14 }}>{description}</div>
+      </div>
+
+      <div style={{ padding: '0 18px', marginBottom: 14 }}>
+        <QuotaBar remaining={remaining} limit={limit} />
+      </div>
+
+      <div style={{ padding: '0 18px', marginBottom: blocked ? 10 : 16 }}>
+        <button className={`send-btn ${btnClass}`} onClick={send} disabled={blocked || sending}>
+          {sending ? '···' : blocked ? `reset in ${countdown}s` : 'Send Request'}
+        </button>
+      </div>
+
+      {blocked && (
+        <div style={{ padding: '0 18px', marginBottom: 14 }}>
+          <div className="blocked-notice">
+            <span>⊘</span>
+            <span>Rate limited — resets in {countdown}s</span>
+          </div>
+        </div>
+      )}
+
+      <div style={{ padding: '14px 18px 16px', borderTop: '1px solid #F0EDE6', marginTop: 'auto' }}>
+        <div className="syne" style={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#C5C2BA', marginBottom: 7 }}>
+          Request log
+        </div>
+        {log.length === 0
+          ? <div style={{ fontSize: '0.67rem', color: '#C5C2BA', fontStyle: 'italic' }}>No requests yet</div>
+          : log.map((e, i) => (
+            <div key={i} className="log-row">
+              <div className="log-dot" style={{ background: e.status === 200 ? '#10B981' : '#EF4444' }} />
+              <span style={{ color: e.status === 200 ? '#10B981' : '#EF4444', fontWeight: 500, minWidth: 28 }}>{e.status}</span>
+              <RelTime ts={e.ts} />
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  )
+}
+
+// ── StatusBar ─────────────────────────────────────────────────────────────
+function StatusBar() {
+  const { factor, cpuPercent, effectiveLimit, enabled } = useLoadStatus()
+  const factorColor  = factor >= 0.8 ? '#34D399' : factor >= 0.5 ? '#FBBF24' : '#F87171'
+  const cpu = Math.round(cpuPercent)
+  const cpuColor = cpu < 60 ? '#34D399' : cpu < 80 ? '#FBBF24' : '#F87171'
+
+  return (
+    <div className="topbar" style={{ padding: '12px 28px' }}>
+      <div style={{ maxWidth: 1060, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 28, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div className="syne" style={{ fontWeight: 800, fontSize: '1.05rem', color: '#fff', letterSpacing: '-0.01em' }}>adaptive-rate-limit</div>
+          <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.35)', marginTop: 1 }}>window 10s · base limit 20 · ip identifier</div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+          <div style={{ textAlign: 'center' }}>
+            <div className="syne" style={{ fontSize: '0.58rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.35)', marginBottom: 2 }}>Load factor</div>
+            <div className="factor-num" style={{ color: factorColor }}>{factor.toFixed(2)}×</div>
+          </div>
+
+          <div className="divider" />
+
+          <div>
+            <div className="syne" style={{ fontSize: '0.58rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.35)', marginBottom: 5 }}>CPU</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div className="cpu-track"><div className="cpu-fill" style={{ width: `${cpu}%`, background: cpuColor }} /></div>
+              <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.65)', minWidth: 32 }}>{cpu}%</span>
+            </div>
+          </div>
+
+          <div className="divider" />
+
+          <div style={{ textAlign: 'center' }}>
+            <div className="syne" style={{ fontSize: '0.58rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.35)', marginBottom: 2 }}>Eff. limit</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
+              <span className="syne" style={{ fontWeight: 800, fontSize: '1.6rem', color: '#fff', lineHeight: 1 }}>{effectiveLimit}</span>
+              <span style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.35)' }}>/20</span>
+            </div>
+          </div>
+
+          <div className="divider" />
+
+          <div>
+            <div className="syne" style={{ fontSize: '0.58rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.35)', marginBottom: 4 }}>Adaptive</div>
+            <span className="adaptive-badge" style={{
+              background: enabled ? 'rgba(52,211,153,0.12)' : 'rgba(255,255,255,0.06)',
+              color: enabled ? '#34D399' : 'rgba(255,255,255,0.3)',
+              border: `1px solid ${enabled ? 'rgba(52,211,153,0.25)' : 'rgba(255,255,255,0.1)'}`,
+            }}>
+              <span className={enabled ? 'pulse-dot' : ''} style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: enabled ? '#34D399' : 'rgba(255,255,255,0.2)' }} />
+              {enabled ? 'ACTIVE' : 'OFF'}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── App ───────────────────────────────────────────────────────────────────
+const ENDPOINTS = [
+  { path: '/api/ping',   cost: 1,  description: 'Lightweight — returns immediately' },
+  { path: '/api/search', cost: 5,  description: 'Medium — simulates a DB query' },
+  { path: '/api/crunch', cost: 10, description: 'CPU-heavy — prime sieve to 50 000' },
+]
+
+function App() {
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <StatusBar />
+      <main style={{ flex: 1, padding: '28px', maxWidth: 1060, margin: '0 auto', width: '100%' }}>
+        <p style={{ fontSize: '0.72rem', color: '#B0ADA5', lineHeight: 1.7, marginBottom: 22 }}>
+          All requests share a single 10s window (limit&nbsp;20). Higher-cost endpoints burn through quota faster.&nbsp;
+          Spam <span style={{ color: '#1C1C1A', fontWeight: 500 }}>/api/crunch</span> to spike CPU and watch the load factor drop — the effective limit will shrink in real time.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 18 }}>
+          {ENDPOINTS.map(e => <EndpointCard key={e.path} {...e} />)}
+        </div>
+      </main>
+    </div>
+  )
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />)
+</script>
+</body>
+</html>
