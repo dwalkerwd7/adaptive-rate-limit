@@ -12,4 +12,4 @@ COPY examples/demo/ ./examples/demo/
 
 EXPOSE 3001
 
-CMD ["node", "examples/demo/server.js"]
+ENTRYPOINT ["node", "examples/demo/server.js"]
