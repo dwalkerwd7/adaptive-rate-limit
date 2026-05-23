@@ -21,9 +21,20 @@ export async function getMultiplier(redis, penaltyKey) {
   return isNaN(parsed) ? 1.0 : parsed
 }
 
-export async function recordViolation(redis, penaltyKey, penaltyOptions) {
+export async function recordViolation(redis, penaltyKey, penaltyOptions, extras = {}) {
   const increment = penaltyOptions?.incrementPerViolation ?? 0.5
   const max = penaltyOptions?.maxMultiplier ?? 4.0
   const decayMs = penaltyOptions?.decayMs ?? 300000
-  await redis.recordViolation(penaltyKey, increment, max, decayMs)
+
+  const newMultiplierStr = await redis.recordViolation(penaltyKey, increment, max, decayMs)
+  const newMultiplier = parseFloat(newMultiplierStr)
+
+  const { prevMultiplier = 1.0, type, req, onViolation } = extras
+  if (onViolation && newMultiplier !== prevMultiplier) {
+    try {
+      onViolation(req, { identifier: { type }, previousMultiplier: prevMultiplier, newMultiplier, decayMs })
+    } catch (err) {
+      console.error("[ARL]: error in onViolation callback:", err)
+    }
+  }
 }
