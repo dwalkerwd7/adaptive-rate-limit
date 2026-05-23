@@ -1,5 +1,8 @@
 import { readFileSync } from "node:fs"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 export function registerScript(redis) {
   const lua = readFileSync(path.join(__dirname, "../strategies/record-violation.lua"), "utf8")

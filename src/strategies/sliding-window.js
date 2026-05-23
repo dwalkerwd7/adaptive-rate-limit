@@ -1,6 +1,9 @@
 import crypto from "node:crypto"
 import { readFileSync } from "node:fs"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // cost members can't really be generated directly in the lua script due to lua limitations on generating random bytes
 function generateCostMembers(cost) {
