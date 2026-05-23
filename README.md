@@ -35,11 +35,6 @@ rate-limiter/
 │   └── redis/
 │       └── client.js            # Redis connection wrapper
 ├── test/
-│   ├── sliding-window.test.js
-│   ├── identifier-chain.test.js
-│   ├── adaptive.test.js
-│   ├── penalty.test.js
-│   ├── inspection.test.js
 │   └── integration.test.js
 ├── docs/                        # The planning docs you're reading
 ├── examples/
