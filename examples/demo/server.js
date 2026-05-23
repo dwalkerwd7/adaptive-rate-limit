@@ -26,10 +26,14 @@ const limiter = createRateLimiter({
   },
   adaptive: {
     enabled: true,
-    cpuThreshold: 60,
+    cpuThreshold: 15,
     minFactor: 0.3,
     pollIntervalMs: 1000,
   },
+})
+
+app.get("/api/status", (_req, res) => {
+  res.json(getLoadMetrics())
 })
 
 app.use(limiter)
@@ -47,7 +51,7 @@ app.get("/api/search", (_req, res) => {
 app.get("/api/crunch", (_req, res) => {
   // synchronous CPU work so the load monitor reacts
   let count = 0
-  for (let n = 2; n < 50_000; n++) {
+  for (let n = 2; n < 500_000; n++) {
     let prime = true
     for (let d = 2; d <= Math.sqrt(n); d++) {
       if (n % d === 0) { prime = false; break }
@@ -55,10 +59,6 @@ app.get("/api/crunch", (_req, res) => {
     if (prime) count++
   }
   res.json({ endpoint: "crunch", cost: 10, primesFound: count })
-})
-
-app.get("/api/status", (_req, res) => {
-  res.json(getLoadMetrics())
 })
 
 const isMain = process.argv[1] === fileURLToPath(import.meta.url)
