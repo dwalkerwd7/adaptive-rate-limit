@@ -106,8 +106,6 @@ All callbacks must be wrapped in try/catch — a user's broken callback shouldn'
 
 ### Task 2.4: Admin dashboard example app (1-1.5 hr)
 
-Build `examples/admin-dashboard/` — a small standalone Express app that *consumes* the library to demonstrate observability.
-
 - `examples/admin-dashboard/server.js` — Express server with three routes:
   - `GET /admin/identifiers` — calls `listActiveIdentifiers`, returns JSON
   - `GET /admin/identifier/:type/:value` — calls `inspectIdentifier`
@@ -117,28 +115,14 @@ Build `examples/admin-dashboard/` — a small standalone Express app that *consu
 - `examples/admin-dashboard/README.md` — explains the demo, screenshot, "how to wire your own dashboard in production."
 
 This is your portfolio piece. Polish the UI a bit — clear table, reasonable styling, sortable columns if you have time.
+Use Tailwind CSS and React for the front-end. It should be clear. Choose a light-themed color palette. Only one theme is necessary.
 
 **Done when:** Running `npm start` in the example directory boots a server on a different port from your main app, and visiting `localhost:PORT` shows live rate-limit state for whichever app is connected to the same Redis.
 
 ### Task 2.5: Documentation, types, and ship prep (1 hr)
 
 - Update top-level README with install instructions, kitchen-sink example, and a link to `examples/admin-dashboard/`
-- Create `examples/basic-app.js` — minimal Express app demonstrating just the middleware (no dashboard)
 - Write `src/index.d.ts` with the full type definitions (see `02-api-design.md`)
 - Add `tsc --noEmit --checkJs` to a `typecheck` script and verify it passes
-- Add a brief CHANGELOG.md
-- (Optional) `npm publish --dry-run` to see exactly what would ship
 
-**Done when:** A new developer can clone, `npm install`, run both `examples/basic-app.js` and `examples/admin-dashboard/server.js`, and see everything work. `npm run typecheck` passes.
-
-## Stretch goals (if time)
-
-- Token bucket strategy as an alternative to sliding window
-- Distributed adaptive metrics (share load info across instances via Redis pub/sub)
-- Prometheus metrics endpoint
-- Hot-reloadable route costs via Redis hash (see note in `04-redis-schema.md`)
-- Real-time updates in the admin dashboard via Server-Sent Events
-
-## Time budget reality check
-
-If you've never written a Lua script for Redis before, Task 1.2 will take longer than 3 hours. Don't blow Day 1 perfecting it — get a working version, write the failing edge case as a test, and come back to it on Day 2 morning if needed. The other tasks don't depend on the Lua being perfect; they depend on the *interface* of `slidingWindow.check()` being stable.
+**Done when:** A new developer can clone, `npm install`, run `node examples/admin-dashboard/server.js`, and see everything work. `npm run typecheck` passes.
