@@ -2,6 +2,12 @@
 
 A production-leaning Express middleware that goes beyond `express-rate-limit` with per-route cost weights, adaptive limits under CPU load, identifier chaining, and escalating penalty scoring — all backed by Redis sliding windows.
 
+## How this was produced
+
+I wrote this by hand 50% and used agentic assistance 50% as a learning exercise for rate limiting and what you
+can do with it. This is a middleware that is for educational purposes only due to it not being professionally tested
+for vulnerabilities with Semgrep or the like.
+
 ```bash
 npm install @dtl/adaptive-rate-limit
 ```
