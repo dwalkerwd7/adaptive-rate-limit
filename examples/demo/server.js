@@ -1,11 +1,9 @@
 import express from "express"
-import path from "path"
 import { fileURLToPath } from "url"
 import Redis from "ioredis"
 import createRateLimiter from "../../src/middleware.js"
 import { getLoadMetrics } from "../../src/inspection.js"
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = process.env.PORT ?? 3001
 const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379"
 
@@ -14,7 +12,7 @@ redis.on("error", err => console.error("[demo] Redis:", err.message))
 
 const app = express()
 app.set("trust proxy", 1)
-app.use(express.static(path.join(__dirname, "public")))
+app.use(express.static(fileURLToPath(new URL("./public", import.meta.url))))
 
 const limiter = createRateLimiter({
   redis,
