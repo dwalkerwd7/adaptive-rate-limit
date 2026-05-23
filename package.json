@@ -11,7 +11,7 @@
     "url": "git+https://github.com/dwalkerwd7/adaptive-rate-limit.git"
   },
   "license": "MIT",
-  "type": "commonjs",
+  "type": "module",
   "main": "src/index.js",
   "types": "src/index.d.ts",
   "files": [
