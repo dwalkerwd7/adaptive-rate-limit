@@ -206,7 +206,7 @@
             <div className="px-5 mb-4">
               <div className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-lg px-3 py-2.5 text-xs text-red-700 font-medium">
                 <span>⊘</span>
-                <span>Rate limited — resets in {countdown}s</span>
+                <span>Rate limited</span>
               </div>
             </div>
           )}
@@ -256,7 +256,7 @@
                   </svg>
                 </a>
               </div>
-              <div className="text-xs text-white/30 mt-0.5 font-mono">window 10s · base limit 20 · ip identifier</div>
+              <div className="text-xs text-white/30 mt-0.5 font-mono">window 10s · base limit 20 · ip + sessionId identifiers</div>
             </div>
 
             {/* Load factor */}
@@ -311,7 +311,7 @@
     const ENDPOINTS = [
       {path: `${PATH_PREFIX}/api/ping`, cost: 1, description: 'Lightweight — returns immediately'},
       {path: `${PATH_PREFIX}/api/search`, cost: 5, description: 'Medium — simulates a DB query'},
-      {path: `${PATH_PREFIX}/api/crunch`, cost: 10, description: 'CPU-heavy — prime sieve to 50 000'},
+      {path: `${PATH_PREFIX}/api/crunch`, cost: 10, description: 'CPU-heavy — prime sieve to 500 000'},
     ]
 
     function App() {
