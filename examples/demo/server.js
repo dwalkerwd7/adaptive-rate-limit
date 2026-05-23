@@ -64,7 +64,7 @@ app.get("/api/status", (_req, res) => {
 const isMain = process.argv[1] === fileURLToPath(import.meta.url)
 if (isMain) {
   app.listen(PORT, () => {
-    console.log(`Demo running at http://localhost:${PORT}`)
+    console.log(`Demo running on port ${PORT}...`)
     console.log(`Redis: ${REDIS_URL}`)
   })
 }
