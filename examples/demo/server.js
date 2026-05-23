@@ -49,16 +49,22 @@ app.get("/api/search", (_req, res) => {
 })
 
 app.get("/api/crunch", (_req, res) => {
-  // synchronous CPU work so the load monitor reacts
-  let count = 0
-  for (let n = 2; n < 500_000; n++) {
-    let prime = true
-    for (let d = 2; d <= Math.sqrt(n); d++) {
-      if (n % d === 0) { prime = false; break }
+  // Burn CPU in 100ms chunks for 3s so the load monitor catches it across poll cycles
+  const burnUntil = Date.now() + 3000
+  function burnChunk() {
+    const stop = Date.now() + 100
+    let n = 2
+    while (Date.now() < stop) {
+      let prime = true
+      for (let d = 2; d <= Math.sqrt(n); d++) {
+        if (n % d === 0) { prime = false; break }
+      }
+      n++
     }
-    if (prime) count++
+    if (Date.now() < burnUntil) setImmediate(burnChunk)
   }
-  res.json({ endpoint: "crunch", cost: 10, primesFound: count })
+  setImmediate(burnChunk)
+  res.json({ endpoint: "crunch", cost: 10, message: "CPU burn started (3s)" })
 })
 
 const isMain = process.argv[1] === fileURLToPath(import.meta.url)
