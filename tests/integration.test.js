@@ -61,9 +61,7 @@ beforeEach(async () => {
   await redis.flushall()
 })
 
-// ─── Task 1.2: Sliding Window ────────────────────────────────────────────────
-
-describe('Task 1.2 — Sliding Window', () => {
+describe('Sliding Window', () => {
   it('allows exactly N requests within a window, blocks the N+1th', async () => {
     const app = createApp({ windowMs: 5000, limit: 5 })
     for (let i = 0; i < 5; i++) {
@@ -132,9 +130,7 @@ describe('Task 1.2 — Sliding Window', () => {
   })
 })
 
-// ─── Task 1.3: Identifier Chaining ──────────────────────────────────────────
-
-describe('Task 1.3 — Identifier Chaining', () => {
+describe('Identifier Chaining', () => {
   it('blocks a user who hit their limit even when they switch to a fresh IP', async () => {
     const app = createApp(
       { windowMs: 5000, limit: 3, identifiers: ['ip', 'userId'] },
@@ -195,9 +191,7 @@ describe('Task 1.3 — Identifier Chaining', () => {
   })
 })
 
-// ─── Task 1.4: Per-Route Cost Weights ────────────────────────────────────────
-
-describe('Task 1.4 — Per-Route Cost Weights', () => {
+describe('Per-Route Cost Weights', () => {
   it('high-cost route exhausts the limit in fewer requests', async () => {
     const app = createApp({
       windowMs: 5000,
@@ -268,9 +262,7 @@ describe('Task 1.4 — Per-Route Cost Weights', () => {
   })
 })
 
-// ─── Task 2.2: Penalty Scorer ────────────────────────────────────────────────
-
-describe('Task 2.2 — Penalty Scorer', () => {
+describe('Penalty Scorer', () => {
   it('writes a penalty key to Redis after a violation, defaulting multiplier to 1.0 + increment', async () => {
     const INCREMENT = 0.5
     const app = createApp({
