@@ -1,5 +1,5 @@
 import Redis from "ioredis"
-import crypto from "node:crypto"
+import { hashValue } from "./utils"
 import createClient from "./redis/client"
 import * as sw from "./strategies/sliding-window"
 import * as sc from "./penalty/scorer.js"
@@ -53,10 +53,10 @@ const createRateLimiter = (options) => {
     for (const i of identifiers) {
       const value = i.extractor(req)
       if (value == null) continue
-      const hashed = crypto.createHash("sha256").update(String(value)).digest("hex").slice(0, 32)
+      const hashed = hashValue(value)
       const windowKey = options.keyPrefix + ":window:" + i.type + ":" + hashed
       const penaltyKey = options.keyPrefix + ":penalty:" + i.type + ":" + hashed
-      identifierData.push({ windowKey, penaltyKey })
+      identifierData.push({ type: i.type, windowKey, penaltyKey })
     }
 
     try {
@@ -110,18 +110,47 @@ const createRateLimiter = (options) => {
 
         for (let i = 0; i < results.length; i++) {
           if (!results[i].allowed) {
-            sc.recordViolation(redisClient, identifierData[i].penaltyKey, options.penalty).catch(err => {
+            sc.recordViolation(redisClient, identifierData[i].penaltyKey, options.penalty, {
+              prevMultiplier: multipliers[i],
+              type: identifierData[i].type,
+              req,
+              onViolation: options.onViolation
+            }).catch(err => {
               console.error("[ARL]: error recording violation for key:", identifierData[i].penaltyKey, err)
             })
           }
         }
       } else {
         next()
+        if (options.onAllowed) {
+          try {
+            const tightest = identifierData[tightest_key_idx]
+            options.onAllowed(req, {
+              identifier: { type: tightest?.type },
+              limit: tightest_res.limit,
+              baseLimit: options.limit,
+              current: tightest_res.count,
+              cost,
+              windowMs: options.windowMs,
+              resetAt: tightest_res.resetAt,
+              adaptiveFactor: 1.0,
+              penaltyMultiplier: tightest_key_idx >= 0 ? multipliers[tightest_key_idx] : 1.0,
+              allowed: true
+            })
+          } catch (err) {
+            console.error("[ARL]: error in onAllowed callback:", err)
+          }
+        }
       }
     } catch (error) {
       if (!("failOpen" in options) || options.failOpen === true) {
         res.set("RateLimit-Status", "degraded")
         next()
+        if (options.onDegraded) {
+          try { options.onDegraded(req, error) } catch (err) {
+            console.error("[ARL]: error in onDegraded callback:", err)
+          }
+        }
       }
       else
         next(Error("[ARL]: error checking rate limits."))
