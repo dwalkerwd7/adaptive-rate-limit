@@ -1,4 +1,5 @@
 import { hashValue } from "./utils"
+import { getInstance } from "./adaptive/load-monitor"
 
 export async function inspectIdentifier(redis, type, value, opts = {}) {
   const keyPrefix = opts.keyPrefix ?? "rl"
@@ -68,14 +69,9 @@ export async function listActiveIdentifiers(redis, opts = {}) {
 }
 
 export function getLoadMetrics() {
-  // load-monitor not yet implemented (task 2.1)
-  return {
-    enabled: false,
-    currentFactor: 1.0,
-    cpuPercent: 0,
-    lastSampleAt: 0,
-    cpuThreshold: 70
-  }
+  const monitor = getInstance()
+  if (monitor) return monitor.getMetrics()
+  return { enabled: false, currentFactor: 1.0, cpuPercent: 0, lastSampleAt: 0, cpuThreshold: 70 }
 }
 
 export async function resetIdentifier(redis, type, value, opts = {}) {

@@ -4,6 +4,7 @@ import createClient from "./redis/client"
 import * as sw from "./strategies/sliding-window"
 import * as sc from "./penalty/scorer.js"
 import resolveIdentifiers from "./indentifiers/chain"
+import { getMonitor } from "./adaptive/load-monitor"
 
 function resolveCost(req, options) {
   if (options.costResolver) return options.costResolver(req)
@@ -45,6 +46,8 @@ const createRateLimiter = (options) => {
   if (!options?.keyPrefix)
     options.keyPrefix = "rl"
 
+  const monitor = options.adaptive?.enabled ? getMonitor(options.adaptive) : null
+
   return async (req, res, next) => {
     const identifiers = resolveIdentifiers(options)
     const cost = resolveCost(req, options)
@@ -64,9 +67,12 @@ const createRateLimiter = (options) => {
         identifierData.map(d => sc.getMultiplier(redisClient, d.penaltyKey))
       )
 
+      const loadFactor = monitor ? monitor.getLoadFactor() : 1.0
+      const adaptedLimit = Math.max(1, Math.round(options.limit * loadFactor))
+
       const results = await Promise.all(
         identifierData.map((d, idx) => {
-          const effectiveLimit = Math.max(1, Math.floor(options.limit / multipliers[idx]))
+          const effectiveLimit = Math.max(1, Math.floor(adaptedLimit / multipliers[idx]))
           return sw.check(redisClient, d.windowKey, options.windowMs, effectiveLimit, cost)
         })
       )
@@ -133,7 +139,7 @@ const createRateLimiter = (options) => {
               cost,
               windowMs: options.windowMs,
               resetAt: tightest_res.resetAt,
-              adaptiveFactor: 1.0,
+              adaptiveFactor: loadFactor,
               penaltyMultiplier: tightest_key_idx >= 0 ? multipliers[tightest_key_idx] : 1.0,
               allowed: true
             })
