@@ -131,8 +131,8 @@ The front-end should not be tested as the back-end covers the integration tests.
 
 ### Task 2.5: Documentation, types, and ship prep (1 hr)
 
-- Update top-level README with install instructions, kitchen-sink example, and a link to `examples/admin-dashboard/`
+- Update top-level README with install instructions, kitchen-sink example, and a link to `derekwalker.tech/arl`
 - Write `src/index.d.ts` with the full type definitions (see `02-api-design.md`)
 - Add `tsc --noEmit --checkJs` to a `typecheck` script and verify it passes
 
-**Done when:** A new developer can clone, `npm install`, run `node examples/admin-dashboard/server.js`, and see everything work. `npm run typecheck` passes.
+**Done when:** A new developer can clone, `npm install`, run `node examples/demo/server.js`, and see everything work. `npm run typecheck` passes.
