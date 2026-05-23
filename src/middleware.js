@@ -15,7 +15,7 @@ function resolveCost(req, options) {
   return 1
 }
 
-export default createRateLimiter = (options) => {
+const createRateLimiter = (options) => {
   if (!options.redis) throw Error("[ARL]: redis options or instance not provided")
   if (typeof options.redis !== "object" && !(options.redis instanceof Redis)) throw TypeError("type of redis provided is not correct")
   if (!options?.windowMs) throw Error("[ARL]: windowMs option required")
@@ -46,23 +46,31 @@ export default createRateLimiter = (options) => {
     options.keyPrefix = "rl"
 
   return async (req, res, next) => {
-    const identifiers = resolveIdentifiers(req, options)
+    const identifiers = resolveIdentifiers(options)
     const cost = resolveCost(req, options)
 
-    let keys = []
-    let promises = []
-
+    const identifierData = []
     for (const i of identifiers) {
       const value = i.extractor(req)
       if (value == null) continue
       const hashed = crypto.createHash("sha256").update(String(value)).digest("hex").slice(0, 32)
-      const key = options.keyPrefix + ":window:" + i.type + ":" + hashed
-      keys.push(key)
-      promises.push(sw.check(redisClient, key, options.windowMs, options.limit, cost))
+      const windowKey = options.keyPrefix + ":window:" + i.type + ":" + hashed
+      const penaltyKey = options.keyPrefix + ":penalty:" + i.type + ":" + hashed
+      identifierData.push({ windowKey, penaltyKey })
     }
 
     try {
-      const results = await Promise.all(promises)
+      const multipliers = await Promise.all(
+        identifierData.map(d => sc.getMultiplier(redisClient, d.penaltyKey))
+      )
+
+      const results = await Promise.all(
+        identifierData.map((d, idx) => {
+          const effectiveLimit = Math.max(1, Math.floor(options.limit / multipliers[idx]))
+          return sw.check(redisClient, d.windowKey, options.windowMs, effectiveLimit, cost)
+        })
+      )
+
       let tightest_res = {
         allowed: 1,
         count: -Infinity,
@@ -71,13 +79,11 @@ export default createRateLimiter = (options) => {
       }
 
       let tightest_key_idx = -1
-      let i = 0
-      for (const r of results) {
-        if (r.count > tightest_res.count) {
-          tightest_res = r
+      for (let i = 0; i < results.length; i++) {
+        if (results[i].count > tightest_res.count) {
+          tightest_res = results[i]
           tightest_key_idx = i
         }
-        i += 1
       }
 
       const remaining = Math.max(0, tightest_res.limit - tightest_res.count)
@@ -100,7 +106,15 @@ export default createRateLimiter = (options) => {
 
       if (!tightest_res.allowed) {
         res.set("Retry-After", Math.ceil((tightest_res.resetAt - Date.now()) / 1000))
-        res.status(429).json({ message: `[ARL]: rate limit exceeded by key: ${keys[tightest_key_idx]}` })
+        res.status(429).json({ message: `[ARL]: rate limit exceeded by key: ${identifierData[tightest_key_idx].windowKey}` })
+
+        for (let i = 0; i < results.length; i++) {
+          if (!results[i].allowed) {
+            sc.recordViolation(redisClient, identifierData[i].penaltyKey, options.penalty).catch(err => {
+              console.error("[ARL]: error recording violation for key:", identifierData[i].penaltyKey, err)
+            })
+          }
+        }
       } else {
         next()
       }
@@ -114,3 +128,5 @@ export default createRateLimiter = (options) => {
     }
   }
 }
+
+export default createRateLimiter
