@@ -1,10 +1,12 @@
-import { describe, it, beforeAll, afterAll, beforeEach, expect } from 'vitest'
+import { describe, it, beforeAll, afterAll, beforeEach, afterEach, expect } from 'vitest'
 import { execSync } from 'node:child_process'
 import net from 'node:net'
 import Redis from 'ioredis'
 import express from 'express'
 import supertest from 'supertest'
 import createRateLimiter from '../src/middleware.js'
+import { inspectIdentifier, listActiveIdentifiers, getLoadMetrics, resetIdentifier } from '../src/inspection.js'
+import { resetMonitor } from '../src/adaptive/load-monitor.js'
 
 let containerId
 let redis
@@ -450,5 +452,331 @@ describe('Penalty Scorer', () => {
     const userKeys = await redis.keys('rl:penalty:userId:*')
     expect(ipKeys.length).toBe(1)
     expect(userKeys.length).toBe(1)
+  })
+})
+
+// ─── Inspection Helpers (Task 2.3) ───────────────────────────────────────────
+
+describe('Inspection Helpers', () => {
+  it('inspectIdentifier returns null when the identifier has no state', async () => {
+    const state = await inspectIdentifier(redis, 'ip', '0.0.0.0', { keyPrefix: 'rl', windowMs: 5000 })
+    expect(state).toBeNull()
+  })
+
+  it('inspectIdentifier returns current window count after requests', async () => {
+    const WINDOW_MS = 5000
+    const app = createApp({ windowMs: WINDOW_MS, limit: 10, identifiers: ['ip'] })
+    const ip = '30.0.0.1'
+
+    await supertest(app).get('/test').set('X-Forwarded-For', ip).expect(200)
+    await supertest(app).get('/test').set('X-Forwarded-For', ip).expect(200)
+    await supertest(app).get('/test').set('X-Forwarded-For', ip).expect(200)
+
+    const state = await inspectIdentifier(redis, 'ip', ip, { keyPrefix: 'rl', windowMs: WINDOW_MS })
+
+    expect(state).not.toBeNull()
+    expect(state.type).toBe('ip')
+    expect(state.value).toBe(ip)
+    expect(state.currentCount).toBe(3)
+    expect(state.windowMs).toBe(WINDOW_MS)
+    expect(state.resetAt).toBeGreaterThan(Date.now())
+    expect(state.penaltyMultiplier).toBe(1.0)
+    expect(state.penaltyExpiresAt).toBeNull()
+  })
+
+  it('inspectIdentifier reflects penalty multiplier and expiry', async () => {
+    const DECAY_MS = 60000
+    const app = createApp({
+      windowMs: 5000,
+      limit: 2,
+      identifiers: ['ip'],
+      penalty: { incrementPerViolation: 0.5, maxMultiplier: 4.0, decayMs: DECAY_MS }
+    })
+    const ip = '30.0.0.2'
+
+    for (let i = 0; i < 3; i++) {
+      await supertest(app).get('/test').set('X-Forwarded-For', ip)
+    }
+    await new Promise(r => setTimeout(r, 150))
+
+    const state = await inspectIdentifier(redis, 'ip', ip, { keyPrefix: 'rl', windowMs: 5000 })
+
+    expect(state.penaltyMultiplier).toBeCloseTo(1.5, 5)
+    expect(state.penaltyExpiresAt).toBeGreaterThan(Date.now())
+  })
+
+  it('listActiveIdentifiers returns a summary for each active window key', async () => {
+    const app = createApp({ windowMs: 5000, limit: 10, identifiers: ['ip'] })
+
+    await supertest(app).get('/test').set('X-Forwarded-For', '31.0.0.1').expect(200)
+    await supertest(app).get('/test').set('X-Forwarded-For', '31.0.0.2').expect(200)
+    await supertest(app).get('/test').set('X-Forwarded-For', '31.0.0.2').expect(200)
+
+    const { cursor, identifiers } = await listActiveIdentifiers(redis, { keyPrefix: 'rl' })
+
+    expect(identifiers.length).toBe(2)
+    expect(identifiers.every(id => id.type === 'ip')).toBe(true)
+    expect(identifiers.every(id => typeof id.valueHash === 'string')).toBe(true)
+    expect(identifiers.every(id => id.penaltyMultiplier === 1.0)).toBe(true)
+    const counts = identifiers.map(id => id.currentCount).sort()
+    expect(counts).toEqual([1, 2])
+    expect(typeof cursor).toBe('string')
+  })
+
+  it('listActiveIdentifiers filterType narrows results to one identifier type', async () => {
+    const app = createApp(
+      { windowMs: 5000, limit: 10, identifiers: ['ip', 'userId'] },
+      [userMiddleware]
+    )
+    await supertest(app).get('/test')
+      .set('X-Forwarded-For', '32.0.0.1')
+      .set('x-user-id', 'eve')
+      .expect(200)
+
+    const ipResult = await listActiveIdentifiers(redis, { keyPrefix: 'rl', filterType: 'ip' })
+    const userResult = await listActiveIdentifiers(redis, { keyPrefix: 'rl', filterType: 'userId' })
+
+    expect(ipResult.identifiers.every(id => id.type === 'ip')).toBe(true)
+    expect(userResult.identifiers.every(id => id.type === 'userId')).toBe(true)
+    expect(ipResult.identifiers.length).toBeGreaterThanOrEqual(1)
+    expect(userResult.identifiers.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('resetIdentifier clears both window and penalty keys', async () => {
+    const app = createApp({
+      windowMs: 5000,
+      limit: 2,
+      identifiers: ['ip'],
+      penalty: { incrementPerViolation: 0.5, maxMultiplier: 4.0, decayMs: 60000 }
+    })
+    const ip = '33.0.0.1'
+
+    for (let i = 0; i < 3; i++) {
+      await supertest(app).get('/test').set('X-Forwarded-For', ip)
+    }
+    await new Promise(r => setTimeout(r, 150))
+
+    expect((await redis.keys('rl:window:ip:*')).length).toBe(1)
+    expect((await redis.keys('rl:penalty:ip:*')).length).toBe(1)
+
+    await resetIdentifier(redis, 'ip', ip)
+
+    expect((await redis.keys('rl:window:ip:*')).length).toBe(0)
+    expect((await redis.keys('rl:penalty:ip:*')).length).toBe(0)
+  })
+
+  it('resetIdentifier allows the identifier to start fresh after being cleared', async () => {
+    const LIMIT = 2
+    const app = createApp({ windowMs: 5000, limit: LIMIT, identifiers: ['ip'] })
+    const ip = '33.0.0.2'
+
+    // exhaust the limit
+    for (let i = 0; i < LIMIT; i++) {
+      await supertest(app).get('/test').set('X-Forwarded-For', ip).expect(200)
+    }
+    await supertest(app).get('/test').set('X-Forwarded-For', ip).expect(429)
+
+    await resetIdentifier(redis, 'ip', ip)
+
+    // full limit available again
+    for (let i = 0; i < LIMIT; i++) {
+      await supertest(app).get('/test').set('X-Forwarded-For', ip).expect(200)
+    }
+  })
+})
+
+// ─── Callbacks (Task 2.3) ────────────────────────────────────────────────────
+
+describe('Callbacks', () => {
+  it('onViolation fires with correct info when penalty multiplier increases', async () => {
+    let violationInfo = null
+    const app = createApp({
+      windowMs: 5000,
+      limit: 2,
+      identifiers: ['ip'],
+      penalty: { incrementPerViolation: 0.5, maxMultiplier: 4.0, decayMs: 60000 },
+      onViolation: (_req, info) => { violationInfo = info }
+    })
+    const ip = '40.0.0.1'
+
+    await supertest(app).get('/test').set('X-Forwarded-For', ip).expect(200)
+    await supertest(app).get('/test').set('X-Forwarded-For', ip).expect(200)
+    await supertest(app).get('/test').set('X-Forwarded-For', ip).expect(429)
+    await new Promise(r => setTimeout(r, 150))
+
+    expect(violationInfo).not.toBeNull()
+    expect(violationInfo.identifier.type).toBe('ip')
+    expect(violationInfo.previousMultiplier).toBe(1.0)
+    expect(violationInfo.newMultiplier).toBeCloseTo(1.5, 5)
+    expect(violationInfo.decayMs).toBe(60000)
+  })
+
+  it('onViolation does not fire when multiplier is already at max', async () => {
+    let callCount = 0
+    const app = createApp({
+      windowMs: 5000,
+      limit: 2,
+      identifiers: ['ip'],
+      penalty: { incrementPerViolation: 10.0, maxMultiplier: 2.0, decayMs: 60000 },
+      onViolation: () => { callCount++ }
+    })
+    const ip = '40.0.0.2'
+
+    // first violation: 1.0 → 2.0 (capped) — fires onViolation
+    for (let i = 0; i < 3; i++) await supertest(app).get('/test').set('X-Forwarded-For', ip)
+    await new Promise(r => setTimeout(r, 150))
+    expect(callCount).toBe(1)
+
+    // subsequent violations: 2.0 → 2.0 (no change) — does NOT fire
+    await supertest(app).get('/test').set('X-Forwarded-For', ip).expect(429)
+    await new Promise(r => setTimeout(r, 150))
+    expect(callCount).toBe(1)
+  })
+
+  it('a throwing onViolation callback does not crash the middleware', async () => {
+    const app = createApp({
+      windowMs: 5000,
+      limit: 1,
+      identifiers: ['ip'],
+      penalty: { incrementPerViolation: 0.5, maxMultiplier: 4.0, decayMs: 60000 },
+      onViolation: () => { throw new Error('callback boom') }
+    })
+    await supertest(app).get('/test').set('X-Forwarded-For', '40.0.0.3').expect(200)
+    await supertest(app).get('/test').set('X-Forwarded-For', '40.0.0.3').expect(429)
+    await new Promise(r => setTimeout(r, 150))
+    // different IP — middleware is still healthy
+    await supertest(app).get('/test').set('X-Forwarded-For', '40.0.0.4').expect(200)
+  })
+
+  it('onAllowed fires for each allowed request with the correct info shape', async () => {
+    let callCount = 0
+    let lastInfo = null
+    const app = createApp({
+      windowMs: 5000,
+      limit: 10,
+      identifiers: ['ip'],
+      onAllowed: (_req, info) => { callCount++; lastInfo = info }
+    })
+    const ip = '40.0.1.1'
+
+    await supertest(app).get('/test').set('X-Forwarded-For', ip).expect(200)
+    await supertest(app).get('/test').set('X-Forwarded-For', ip).expect(200)
+
+    expect(callCount).toBe(2)
+    expect(lastInfo.allowed).toBe(true)
+    expect(lastInfo.baseLimit).toBe(10)
+    expect(lastInfo.current).toBe(2)
+    expect(lastInfo.cost).toBe(1)
+    expect(lastInfo.windowMs).toBe(5000)
+    expect(lastInfo.adaptiveFactor).toBe(1.0)
+    expect(lastInfo.penaltyMultiplier).toBe(1.0)
+    expect(lastInfo.resetAt).toBeGreaterThan(Date.now())
+    expect(lastInfo.identifier.type).toBe('ip')
+  })
+
+  it('onAllowed does not fire for blocked requests', async () => {
+    let callCount = 0
+    const app = createApp({
+      windowMs: 5000,
+      limit: 2,
+      identifiers: ['ip'],
+      onAllowed: () => { callCount++ }
+    })
+    const ip = '40.0.1.2'
+
+    await supertest(app).get('/test').set('X-Forwarded-For', ip).expect(200)
+    await supertest(app).get('/test').set('X-Forwarded-For', ip).expect(200)
+    await supertest(app).get('/test').set('X-Forwarded-For', ip).expect(429)
+
+    expect(callCount).toBe(2)
+  })
+
+  it('onDegraded fires with the Redis error when failing open', async () => {
+    let degradedError = null
+    const brokenRedis = new Redis({
+      host: '127.0.0.1', port: 19999,
+      maxRetriesPerRequest: 0, enableOfflineQueue: false, lazyConnect: true
+    })
+    const app = express()
+    app.use(createRateLimiter({
+      redis: brokenRedis, windowMs: 5000, limit: 10,
+      failOpen: true,
+      onDegraded: (_req, err) => { degradedError = err }
+    }))
+    app.get('/test', (_req, res) => res.json({ ok: true }))
+
+    await supertest(app).get('/test').expect(200)
+
+    expect(degradedError).toBeInstanceOf(Error)
+    brokenRedis.disconnect()
+  })
+
+  it('a throwing onDegraded callback does not crash the middleware', async () => {
+    const brokenRedis = new Redis({
+      host: '127.0.0.1', port: 19999,
+      maxRetriesPerRequest: 0, enableOfflineQueue: false, lazyConnect: true
+    })
+    const app = express()
+    app.use(createRateLimiter({
+      redis: brokenRedis, windowMs: 5000, limit: 10,
+      failOpen: true,
+      onDegraded: () => { throw new Error('callback boom') }
+    }))
+    app.get('/test', (_req, res) => res.json({ ok: true }))
+
+    await supertest(app).get('/test').expect(200)
+    brokenRedis.disconnect()
+  })
+})
+
+// ─── Adaptive Load Monitor (Task 2.1) ────────────────────────────────────────
+
+describe('Adaptive Load Monitor', () => {
+  afterEach(() => resetMonitor())
+
+  it('getLoadMetrics returns disabled stub before any adaptive middleware is created', () => {
+    const metrics = getLoadMetrics()
+    expect(metrics).toEqual({ enabled: false, currentFactor: 1.0, cpuPercent: 0, lastSampleAt: 0, cpuThreshold: 70 })
+  })
+
+  it('starts the monitor and returns live metrics when adaptive.enabled is true', () => {
+    createApp({ windowMs: 5000, limit: 10, adaptive: { enabled: true, cpuThreshold: 80 } })
+    const metrics = getLoadMetrics()
+    expect(metrics.enabled).toBe(true)
+    expect(metrics.cpuThreshold).toBe(80)
+    expect(metrics.currentFactor).toBeGreaterThanOrEqual(0.3)
+    expect(metrics.currentFactor).toBeLessThanOrEqual(1.0)
+    expect(typeof metrics.cpuPercent).toBe('number')
+    expect(typeof metrics.lastSampleAt).toBe('number')
+  })
+
+  it('a second adaptive middleware reuses the existing monitor (singleton)', () => {
+    createApp({ windowMs: 5000, limit: 10, adaptive: { enabled: true, cpuThreshold: 65 } })
+    createApp({ windowMs: 5000, limit: 10, adaptive: { enabled: true, cpuThreshold: 90 } })
+    // first caller's options win — cpuThreshold 90 from the second call is ignored
+    expect(getLoadMetrics().cpuThreshold).toBe(65)
+  })
+
+  it('onAllowed info includes the adaptive factor from the monitor', async () => {
+    let capturedFactor = null
+    const app = createApp({
+      windowMs: 5000,
+      limit: 10,
+      adaptive: { enabled: true },
+      onAllowed: (_req, info) => { capturedFactor = info.adaptiveFactor }
+    })
+    await supertest(app).get('/test').expect(200)
+    expect(typeof capturedFactor).toBe('number')
+    expect(capturedFactor).toBeGreaterThan(0)
+    expect(capturedFactor).toBeLessThanOrEqual(1.0)
+  })
+
+  it('adaptive does not break normal request flow', async () => {
+    const app = createApp({ windowMs: 5000, limit: 10, adaptive: { enabled: true } })
+    // At idle CPU the factor is 1.0, so full limit applies.
+    // Use a conservative count so the test passes even under mild CI load.
+    for (let i = 0; i < 5; i++) {
+      await supertest(app).get('/test').expect(200)
+    }
   })
 })
