@@ -11,6 +11,7 @@ const REDIS_URL = process.env.REDIS_URL ?? "redis://localhost:6379"
 export const ADMIN_TOKEN = process.env.ADMIN_TOKEN ?? "dev-token-change-in-production"
 
 export const redis = new Redis(REDIS_URL, { lazyConnect: true })
+redis.on('error', err => console.error('[admin] Redis:', err.message))
 export const app = express()
 app.use(express.json())
 app.use(express.static(path.join(__dirname, "public")))
