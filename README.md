@@ -1,78 +1,269 @@
-# Adaptive Rate Limiter Middleware
+# adaptive-rate-limit
 
-A production-leaning Express middleware that goes beyond `express-rate-limit` and `rate-limit-redis` with per-route cost weights, adaptive limits based on server load, identifier chaining, and penalty scoring.
+A production-leaning Express middleware that goes beyond `express-rate-limit` with per-route cost weights, adaptive limits under CPU load, identifier chaining, and escalating penalty scoring — all backed by Redis sliding windows.
 
-## Why This Exists
-
-Existing rate limiter packages handle the basics (fixed window, sliding window, token bucket) but treat every request the same, ignore server health, and can't combine multiple identifiers. This middleware addresses all three gaps and adds escalating penalties for repeat offenders.
-
-## Feature Set
-
-1. **Sliding window in Redis** — accurate windowing using sorted sets
-2. **Per-route cost weights** — expensive endpoints cost more tokens
-3. **Identifier chaining** — limit by IP + user ID + API key simultaneously
-4. **Adaptive limits** — tighten under high CPU load, relax when idle
-5. **Penalty scoring** — repeat 429s tighten future windows
-6. **Debug dashboard** — live Redis state at `/ratelimit/debug`
-
-## Project Structure
-
-```
-rate-limiter/
-├── src/
-│   ├── index.js                 # Public API export
-│   ├── index.d.ts               # TypeScript declarations
-│   ├── middleware.js            # Express middleware factory
-│   ├── inspection.js            # Read-only helpers for admin tooling
-│   ├── strategies/
-│   │   └── sliding-window.js    # Sliding window implementation
-│   ├── identifiers/
-│   │   └── chain.js             # Identifier chaining logic
-│   ├── adaptive/
-│   │   └── load-monitor.js      # CPU/load polling
-│   ├── penalty/
-│   │   └── scorer.js            # Penalty tracking
-│   └── redis/
-│       └── client.js            # Redis connection wrapper
-├── test/
-│   └── integration.test.js
-├── docs/                        # The planning docs you're reading
-├── examples/
-│   ├── basic-app.js             # Minimal middleware usage
-│   └── admin-dashboard/         # Reference admin UI built on inspection helpers
-│       ├── server.js
-│       ├── public/index.html
-│       └── README.md
-└── package.json
+```bash
+npm install @dtl/adaptive-rate-limit
 ```
 
-## Tech Stack
+**[Live demo](https://derekwalker.tech/arl) · [Full API reference](#api-reference)**
 
-- Node.js 20+
-- Express 4
-- ioredis (better Lua scripting support than `redis` package)
-- Vitest (faster than Jest, ESM-native)
-- Supertest (HTTP assertions)
+---
 
-## Documentation Index
+## Why not `express-rate-limit`?
 
-Read these in order. Each one is a context file you can hand Claude when reviewing your code for that section.
+| Feature | express-rate-limit | adaptive-rate-limit |
+|---|---|---|
+| Sliding window in Redis | ✗ (fixed window) | ✓ |
+| Per-route cost weights | ✗ | ✓ |
+| Adaptive limits under load | ✗ | ✓ |
+| Multiple identifiers per request | ✗ | ✓ |
+| Penalty scoring for repeat offenders | ✗ | ✓ |
 
-1. **`01-architecture.md`** — how the pieces fit together, data flow, Redis key schema
-2. **`02-api-design.md`** — the public API surface, configuration options, return values
-3. **`03-implementation-plan.md`** — day-by-day breakdown with task-level scope
-4. **`04-redis-schema.md`** — every key, value type, TTL, and Lua script
-5. **`05-testing-strategy.md`** — what to test, how to simulate bursts, fixtures
-6. **`06-review-checklist.md`** — what Claude should look for when reviewing your code
+---
 
-## How to Use This With Claude
+## Quick start
 
-For each feature you implement:
+```js
+import createRateLimiter from '@dtl/adaptive-rate-limit'
+import Redis from 'ioredis'
 
-1. Read the relevant doc section yourself first
-2. Write the code without Claude's help
-3. Open a fresh chat, paste the relevant doc(s) + your code
-4. Ask: "Review against the spec. Find bugs, missed edge cases, and security holes."
-5. Iterate
+const redis = new Redis({ host: 'localhost', port: 6379 })
 
-The docs are your spec. Don't let Claude rewrite them — let Claude poke holes in your implementation against them.
+app.use(createRateLimiter({
+  redis,
+  windowMs: 60_000,
+  limit: 100,
+}))
+```
+
+That's it. The middleware sets `RateLimit-*` headers on every response and returns `429 Too Many Requests` when the limit is exceeded.
+
+---
+
+## Kitchen-sink example
+
+```js
+import createRateLimiter from '@dtl/adaptive-rate-limit'
+
+app.use(createRateLimiter({
+  redis: redisClient,
+
+  // Sliding window of 1 minute, base limit of 100 requests
+  windowMs: 60_000,
+  limit: 100,
+
+  // Check IP, authenticated user, and API key — block if any one is over limit
+  identifiers: ['ip', 'user', 'apiKey'],
+
+  // Expensive endpoints cost more tokens
+  routeCosts: {
+    'POST /api/ai/generate': 10,
+    'POST /api/upload': 5,
+    'GET /api/health': 0,   // doesn't count
+    default: 1,
+  },
+
+  // Tighten limits when the server is under load
+  adaptive: {
+    enabled: true,
+    cpuThreshold: 75,       // start reducing limit above 75% CPU
+    minFactor: 0.3,         // never go below 30% of base limit
+  },
+
+  // Escalate penalties for repeat offenders
+  penalty: {
+    enabled: true,
+    maxMultiplier: 4,       // worst case: limit drops to 25%
+    incrementPerViolation: 0.5,
+    decayMs: 300_000,       // penalty expires after 5 min of good behaviour
+  },
+
+  // Callbacks (all optional, all fire-and-forget)
+  onLimit: (req, res, info) => {
+    logger.warn({ info }, 'rate limited')
+    metrics.increment('ratelimit.blocked', { type: info.identifier.type })
+  },
+  onViolation: (req, info) => {
+    if (info.newMultiplier >= 3)
+      logger.error({ ip: req.ip }, 'repeat offender — investigate')
+  },
+  onDegraded: (req, error) => {
+    logger.error({ err: error }, 'Redis unreachable — failing open')
+  },
+}))
+```
+
+---
+
+## API reference
+
+### `createRateLimiter(options)` → `express.RequestHandler`
+
+#### Required options
+
+| Option | Type | Description |
+|---|---|---|
+| `redis` | `Redis \| RedisOptions` | ioredis instance or connection config |
+| `windowMs` | `number` | Window size in ms (min 1000) |
+| `limit` | `number` | Base request limit per window |
+
+#### Identifiers
+
+```js
+// Built-in presets
+identifiers: ['ip', 'user', 'apiKey', 'session']
+
+// Custom extractor
+identifiers: [
+  'ip',
+  { type: 'tenant', extractor: (req) => req.headers['x-tenant-id'] },
+]
+```
+
+Extractors that return `null`/`undefined` are silently skipped for that request.
+
+#### Route costs
+
+```js
+routeCosts: {
+  'POST /api/expensive': 10,
+  'GET /api/cheap': 1,
+  default: 1,          // fallback for unlisted routes
+}
+
+// Or a function
+costResolver: (req) => parseInt(req.headers['x-cost'] ?? '1', 10)
+```
+
+#### Adaptive load
+
+```js
+adaptive: {
+  enabled: true,
+  cpuThreshold: 70,    // % CPU where limiting starts (default 70)
+  minFactor: 0.3,      // floor factor (default 0.3)
+  maxFactor: 1.0,      // ceiling factor (default 1.0)
+  pollIntervalMs: 5000, // how often to sample CPU (default 5000)
+}
+```
+
+The effective limit at any moment is `floor(limit × loadFactor)`, always at least 1.
+
+#### Penalty scoring
+
+```js
+penalty: {
+  enabled: true,
+  maxMultiplier: 4,          // limit → limit/4 at worst (default 4)
+  incrementPerViolation: 0.5, // added to multiplier per 429 (default 0.5)
+  decayMs: 300_000,           // TTL reset on each violation (default 300 000)
+}
+```
+
+#### Other options
+
+| Option | Default | Description |
+|---|---|---|
+| `keyPrefix` | `'rl'` | Redis key prefix |
+| `failOpen` | `true` | Allow requests when Redis is down |
+| `standardHeaders` | `true` | Set `RateLimit-*` headers (IETF draft) |
+| `onLimit` | — | Called on every 429 |
+| `onViolation` | — | Called when penalty multiplier increases |
+| `onDegraded` | — | Called when Redis fails open |
+| `onAllowed` | — | Called on every allowed request (hot path — use carefully) |
+
+### Inspection helpers
+
+Plain async functions for building admin tooling. Not Express middleware.
+
+```js
+import {
+  inspectIdentifier,
+  listActiveIdentifiers,
+  getLoadMetrics,
+  resetIdentifier,
+} from '@dtl/adaptive-rate-limit'
+```
+
+#### `inspectIdentifier(redis, type, value, opts?)`
+
+Returns the full state for one identifier, or `null` if no record exists.
+
+```js
+const state = await inspectIdentifier(redis, 'ip', '1.2.3.4', { windowMs: 60_000 })
+// {
+//   type: 'ip', value: '1.2.3.4', currentCount: 42,
+//   windowMs: 60000, resetAt: 1234567890000,
+//   penaltyMultiplier: 2.0, penaltyExpiresAt: 1234567890000
+// }
+```
+
+#### `listActiveIdentifiers(redis, opts?)`
+
+Paginated scan of all tracked identifiers. Uses `SCAN` internally.
+
+```js
+const { cursor, identifiers } = await listActiveIdentifiers(redis, {
+  cursor: '0',
+  count: 100,
+  filterType: 'ip',   // optional — filter by identifier type
+})
+```
+
+#### `getLoadMetrics()`
+
+Synchronous. Returns the current load monitor state.
+
+```js
+const { enabled, currentFactor, cpuPercent, cpuThreshold } = getLoadMetrics()
+```
+
+#### `resetIdentifier(redis, type, value, opts?)`
+
+Clears both the window and penalty for an identifier. Useful for support workflows.
+
+```js
+await resetIdentifier(redis, 'ip', '1.2.3.4')
+```
+
+---
+
+## Response headers
+
+**Allowed request:**
+```
+RateLimit-Limit: 100
+RateLimit-Remaining: 87
+RateLimit-Reset: 1714000000000
+RateLimit-Policy: 100;w=60
+```
+
+**Blocked (429):**
+```
+HTTP/1.1 429 Too Many Requests
+Retry-After: 23
+RateLimit-Remaining: 0
+```
+
+When multiple identifiers are configured, headers reflect the tightest one (lowest remaining).
+
+---
+
+## Running the demo
+
+```bash
+docker run -p 6379:6379 redis:7-alpine
+cd examples/demo && npm start
+# → http://localhost:3001
+```
+
+Three endpoint cards share a 10-second window. Hit `/api/crunch` repeatedly to spike CPU and watch the adaptive load factor drop in real time.
+
+---
+
+## Requirements
+
+- Node.js 18+
+- Redis 7+
+- Express 5+
